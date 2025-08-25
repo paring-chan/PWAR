@@ -6,10 +6,14 @@
 
 🎵 **PWAR (PipeWire ASIO Relay)** is a zero-drift, real-time audio bridge between Windows ASIO hosts and Linux PipeWire. It enables ultra-low-latency audio streaming across platforms, making it ideal for musicians, streamers, and audio professionals.
 
+---
+
+## 📸 Demo
+
 <p align="center">
-  <img src="media/screenshot.png" alt="PWAR GUI in Action" width="500">
+  <img src="media/screenshot.png" alt="PWAR GUI Screenshot" width="600">
   <br>
-  <em>PWAR's intuitive Qt-based GUI showing real-time audio streaming between Windows and Linux</em>
+  <em>The Qt-based GUI provides an easy way to configure and monitor audio streaming</em>
 </p>
 
 ---
