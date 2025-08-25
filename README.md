@@ -72,8 +72,6 @@ Download the Windows ASIO driver from the [releases page](https://github.com/rip
 3. **Configure** by creating `%USERPROFILE%\pwarASIO.cfg` with your Linux server's IP:
    ```
    udp_send_ip=192.168.1.100
-   oneshot_enabled=1
-   variable_buffer_size=1
    ```
 
 ---
@@ -125,15 +123,6 @@ Create or edit `%USERPROFILE%\pwarASIO.cfg` with the following options:
 ```ini
 # Required: Linux server IP address
 udp_send_ip=192.168.1.100
-
-# Optional: Enable oneshot mode for minimal latency (default: 0)
-oneshot_enabled=1
-
-# Optional: Allow variable buffer sizes (default: 0)
-variable_buffer_size=1
-
-# Optional: Set custom port (default: 8321)
-udp_port=8321
 ```
 
 ### Linux CLI Options
