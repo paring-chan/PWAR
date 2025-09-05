@@ -11,6 +11,10 @@ find_package(Qt5 COMPONENTS Core Widgets Quick Qml QUIET)
 # Math library
 find_library(MATH_LIB m)
 
+# Find ALSA for ALSA-only build
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(ALSA REQUIRED alsa)
+
 # Include directories
 include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 include_directories(${CMAKE_SOURCE_DIR}/protocol)
@@ -119,6 +123,16 @@ target_link_libraries(windows_sim
 target_compile_options(windows_sim PRIVATE ${PIPEWIRE_CFLAGS_OTHER})
 
 # Integration test subdirectory
+
+# ALSA-only executable with PWAR protocol support
+add_executable(alsa_pwar 
+    alsa_pwar.c
+    ${PROTOCOL_SOURCES}
+)
+target_include_directories(alsa_pwar PRIVATE ${ALSA_INCLUDE_DIRS})
+target_link_libraries(alsa_pwar ${ALSA_LIBRARIES} ${MATH_LIB} pthread)
+target_compile_options(alsa_pwar PRIVATE ${ALSA_CFLAGS_OTHER})
+
 add_subdirectory(test)
 
 # Install targets
