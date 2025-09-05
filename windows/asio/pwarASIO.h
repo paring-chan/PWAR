@@ -72,6 +72,7 @@ private:
     void output(const pwar_packet_t& packet);
     void bufferSwitchX();
     void udp_packet_listener();
+    void udp_iocp_listener();  // New IOCP-based listener
     void startUdpListener();
     void stopUdpListener();
     void initUdpSender();
