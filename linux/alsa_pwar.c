@@ -30,7 +30,7 @@
 #define PWAR_STREAM_IP          "192.168.66.3"
 #define PWAR_STREAM_PORT        8321
 #define PWAR_RECV_PORT          8321
-#define PWAR_ONESHOT_MODE       1        // 1 = oneshot, 0 = ping-pong
+#define PWAR_ONESHOT_MODE       0        // 1 = oneshot, 0 = ping-pong
 #define PWAR_PASSTHROUGH_TEST   0        // 1 = local passthrough test
 
 // ---- ALSA Config ----------------------------------------
