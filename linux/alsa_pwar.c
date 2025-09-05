@@ -32,12 +32,13 @@
 #define PWAR_RECV_PORT          8321
 #define PWAR_ONESHOT_MODE       0        // 1 = oneshot, 0 = ping-pong
 #define PWAR_PASSTHROUGH_TEST   0        // 1 = local passthrough test
+#define PWAR_MAX_BUFFER_SIZE    4096
 
 // ---- ALSA Config ----------------------------------------
 #define PCM_DEVICE_PLAYBACK "hw:3,0"
 #define PCM_DEVICE_CAPTURE  "hw:3,0"
 #define SAMPLE_RATE         48000
-#define FRAMES              64
+#define FRAMES              32
 #define PB_CHANNELS         2
 #define CAP_CHANNELS        2
 // ---------------------------------------------------------
@@ -123,7 +124,7 @@ static void *receiver_thread(void *userdata) {
 
     pwar_data_t *data = (pwar_data_t *)userdata;
     char recv_buffer[sizeof(pwar_packet_t) > sizeof(pwar_latency_info_t) ? sizeof(pwar_packet_t) : sizeof(pwar_latency_info_t)];
-    float output_buffers[PWAR_CHANNELS * PWAR_PACKET_MAX_CHUNK_SIZE] = {0};
+    float output_buffers[PWAR_CHANNELS * PWAR_MAX_BUFFER_SIZE] = {0};
 
     while (keep_running) {
         ssize_t n = recvfrom(data->recv_sockfd, recv_buffer, sizeof(recv_buffer), 0, NULL, NULL);
@@ -140,7 +141,7 @@ static void *receiver_thread(void *userdata) {
                 pthread_mutex_unlock(&data->packet_mutex);
             } else {
                 int samples_ready = pwar_router_process_packet(&data->router, packet, output_buffers, 
-                                                               PWAR_PACKET_MAX_CHUNK_SIZE, PWAR_CHANNELS);
+                                                               PWAR_MAX_BUFFER_SIZE, PWAR_CHANNELS);
                 if (samples_ready > 0) {
                     pthread_mutex_lock(&data->pwar_rcv_mutex);
                     pwar_rcv_buffer_add_buffer(output_buffers, samples_ready, PWAR_CHANNELS);
