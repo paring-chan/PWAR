@@ -1,6 +1,7 @@
 // Simulated Audio Backend for PWAR
 // Provides perfect timing simulation for testing without hardware
 
+#define _GNU_SOURCE
 #include "audio_backend.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -24,10 +25,8 @@ typedef struct {
     uint32_t channels_out;
     
     // Test signal generation
-    double phase_left;
-    double phase_right;
-    double freq_left;   // 440 Hz (A4)
-    double freq_right;  // 880 Hz (A5)
+    double phase;
+    double freq;        // Low frequency for latency measurement
     
     // Timing statistics
     uint64_t total_callbacks;
@@ -45,8 +44,7 @@ static void* simulated_thread(void* arg) {
     printf("[Simulated Audio] Starting audio simulation thread\n");
     printf("[Simulated Audio] Sample rate: %u Hz, Buffer size: %u frames\n", 
            data->sample_rate, data->frames);
-    printf("[Simulated Audio] Test signals: %.1f Hz (left), %.1f Hz (right)\n",
-           data->freq_left, data->freq_right);
+    printf("[Simulated Audio] Test signal: %.1f Hz\n", data->freq);
     
     // Calculate precise timing for buffer delivery
     uint64_t frame_time_ns = (uint64_t)data->frames * 1000000000ULL / data->sample_rate;
@@ -57,8 +55,8 @@ static void* simulated_thread(void* arg) {
     
     printf("[Simulated Audio] Buffer interval: %.3f ms\n", frame_time_ns / 1000000.0);
     
-    // Allocate buffers
-    float *input_buffer = calloc(data->frames * data->channels_in, sizeof(float));
+    // Allocate buffers (single channel input)
+    float *input_buffer = calloc(data->frames, sizeof(float));
     float *output_left = calloc(data->frames, sizeof(float));
     float *output_right = calloc(data->frames, sizeof(float));
     
@@ -71,23 +69,19 @@ static void* simulated_thread(void* arg) {
     clock_gettime(CLOCK_MONOTONIC, &data->start_time);
     
     while (data->running) {
-        // Generate test input signal (sine waves)
+        // Generate test input signal (single channel sine wave)
         for (uint32_t i = 0; i < data->frames; i++) {
-            // Generate stereo input with different frequencies
-            float sample_left = 0.3f * sinf(2.0f * M_PI * data->phase_left);
-            float sample_right = 0.3f * sinf(2.0f * M_PI * data->phase_right);
+            // Generate single channel input with low frequency for latency measurement
+            float sample = 0.3f * sinf(2.0f * M_PI * data->phase);
             
-            // Interleaved input (simulate stereo capture)
-            if (data->channels_in >= 1) input_buffer[i * data->channels_in + 0] = sample_left;
-            if (data->channels_in >= 2) input_buffer[i * data->channels_in + 1] = sample_right;
+            // Single channel input (not interleaved)
+            input_buffer[i] = sample;
             
-            // Update phases
-            data->phase_left += data->freq_left / data->sample_rate;
-            data->phase_right += data->freq_right / data->sample_rate;
+            // Update phase
+            data->phase += data->freq / data->sample_rate;
             
-            // Keep phases in range [0, 1)
-            if (data->phase_left >= 1.0) data->phase_left -= 1.0;
-            if (data->phase_right >= 1.0) data->phase_right -= 1.0;
+            // Keep phase in range [0, 1)
+            if (data->phase >= 1.0) data->phase -= 1.0;
         }
         
         // Call the audio processing callback (PWAR protocol processing)
@@ -135,11 +129,10 @@ static int simulated_init(audio_backend_t *backend, const audio_config_t *config
     data->running = 0;
     data->total_callbacks = 0;
     
-    // Test signal frequencies (musical intervals for easy identification)
-    data->freq_left = 440.0;   // A4
-    data->freq_right = 880.0;  // A5 (one octave higher)
-    data->phase_left = 0.0;
-    data->phase_right = 0.0;
+    // Test signal frequency (low frequency for latency measurement)
+    // At 50 Hz, zero crossings are ~10ms apart, good for measuring 0.8-30ms latency
+    data->freq = 50.0;    // 50 Hz sine wave
+    data->phase = 0.0;
     
     backend->private_data = data;
     backend->callback = callback;

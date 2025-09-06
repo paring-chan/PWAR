@@ -167,8 +167,8 @@ int main(int argc, char *argv[]) {
     } else if (config.backend_type == AUDIO_BACKEND_PIPEWIRE) {
         printf("  Audio I/O: PipeWire filter with %u channels\n", config.audio_config.capture_channels);
     } else if (config.backend_type == AUDIO_BACKEND_SIMULATED) {
-        printf("  Audio I/O: Simulated audio with %u channels (test signals: 440Hz/880Hz)\n", 
-               config.audio_config.capture_channels);
+        printf("  Audio I/O: Simulated audio\n"); 
+               
     }
     printf("\n");
     
