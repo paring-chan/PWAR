@@ -171,8 +171,12 @@ add_executable(client_simulator
 
 target_link_libraries(client_simulator pwar)
 
-# Integration test subdirectory
-add_subdirectory(test)
+# Integration test subdirectory (only if PipeWire is available)
+if(HAVE_PIPEWIRE)
+    add_subdirectory(test)
+else()
+    message(STATUS "PipeWire not found - skipping integration tests")
+endif()
 
 # Install targets
 install(TARGETS pwar pwar_cli DESTINATION bin)
