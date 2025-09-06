@@ -31,10 +31,72 @@ typedef struct {
     // Timing statistics
     uint64_t total_callbacks;
     struct timespec start_time;
+
+    uint64_t last_input_zero_cross;
+    uint64_t last_output_zero_cross;
+    float rtt;
+
+    // RTT stats for last 2 seconds
+    float rtt_min;
+    float rtt_max;
+    double rtt_sum;
+    uint32_t rtt_count;
+    uint32_t discontinuities;
 } simulated_backend_data_t;
 
 static uint64_t timespec_to_ns(const struct timespec *ts) {
     return (uint64_t)ts->tv_sec * 1000000000ULL + ts->tv_nsec;
+}
+
+// Get the current time in nanoseconds
+static uint64_t get_current_time_ns() {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return timespec_to_ns(&ts);
+}
+
+static void perform_analysis(simulated_backend_data_t *data, float *input_buffer, float *output_left, float *output_right, uint32_t frames) {
+    // Print every value in left output buffer for debugging
+    static float last_input_sample = 0.0f;
+    static float last_output_sample = 0.0f;
+
+    static double output_phase = 0.0;
+    const float epsilon = 1e-4f; // Acceptable error margin
+
+    for (uint32_t i = 0; i < frames; i++) {
+        // Input zero crossing: could be used for sync, but we just track RTT as before
+        if (input_buffer[i] >= 0.0f && last_input_sample < 0.0f) {
+            data->last_input_zero_cross = get_current_time_ns();
+        }
+        if (output_left[i] >= 0.0f && last_output_sample < 0.0f) {
+            output_phase = 0.0; // Reset output phase on zero crossing
+            data->last_output_zero_cross = get_current_time_ns();
+            data->rtt = (data->last_output_zero_cross - data->last_input_zero_cross) / 1000000.0f; // in ms
+
+            // Update RTT stats
+            if (data->rtt_count == 0) {
+                data->rtt_min = data->rtt_max = data->rtt;
+                data->rtt_sum = data->rtt;
+            } else {
+                if (data->rtt < data->rtt_min) data->rtt_min = data->rtt;
+                if (data->rtt > data->rtt_max) data->rtt_max = data->rtt;
+                data->rtt_sum += data->rtt;
+            }
+            data->rtt_count++;
+        }
+
+        // For every sample, verify output_left matches expected sine value
+        double expected_sample = 0.3 * sin(2.0 * M_PI * output_phase);
+        if (fabsf(output_left[i] - expected_sample) > epsilon) {
+            data->discontinuities++;
+        }
+
+        output_phase += data->freq / data->sample_rate;
+        if (output_phase >= 1.0) output_phase -= 1.0;
+
+        last_input_sample = input_buffer[i];
+        last_output_sample = output_left[i];
+    }
 }
 
 static void* simulated_thread(void* arg) {
@@ -59,47 +121,57 @@ static void* simulated_thread(void* arg) {
     float *input_buffer = calloc(data->frames, sizeof(float));
     float *output_left = calloc(data->frames, sizeof(float));
     float *output_right = calloc(data->frames, sizeof(float));
-    
+
     if (!input_buffer || !output_left || !output_right) {
         printf("[Simulated Audio] Failed to allocate buffers\n");
         goto cleanup;
     }
-    
+
     // Record start time
     clock_gettime(CLOCK_MONOTONIC, &data->start_time);
-    
+
+    // Initialize RTT stats
+    data->rtt_min = 0.0f;
+    data->rtt_max = 0.0f;
+    data->rtt_sum = 0.0;
+    data->rtt_count = 0;
+
     while (data->running) {
         // Generate test input signal (single channel sine wave)
         for (uint32_t i = 0; i < data->frames; i++) {
-            // Generate single channel input with low frequency for latency measurement
             float sample = 0.3f * sinf(2.0f * M_PI * data->phase);
-            
-            // Single channel input (not interleaved)
             input_buffer[i] = sample;
-            
-            // Update phase
             data->phase += data->freq / data->sample_rate;
-            
-            // Keep phase in range [0, 1)
             if (data->phase >= 1.0) data->phase -= 1.0;
         }
-        
+
         // Call the audio processing callback (PWAR protocol processing)
         if (data->callback) {
             data->callback(input_buffer, output_left, output_right, data->frames, data->userdata);
         }
-        
+
         data->total_callbacks++;
-        
-        // Print periodic status (every 5 seconds)
-        if (0 && data->total_callbacks % (5 * data->sample_rate / data->frames) == 0) {
-            struct timespec now;
-            clock_gettime(CLOCK_MONOTONIC, &now);
-            double elapsed = (timespec_to_ns(&now) - timespec_to_ns(&data->start_time)) / 1000000000.0;
-            printf("[Simulated Audio] Running for %.1fs, %llu callbacks processed\n", 
-                   elapsed, (unsigned long long)data->total_callbacks);
+
+        perform_analysis(data, input_buffer, output_left, output_right, data->frames);
+
+        // Print periodic RTT stats (every 2nd second)
+        if (data->total_callbacks % (2 * data->sample_rate / data->frames) == 0) {
+            float rtt_avg = (data->rtt_count > 0) ? (float)(data->rtt_sum / data->rtt_count) : 0.0f;
+            printf("[Simulated Audio]: AudioProc: RTT: min=%.3fms max=%.3fms avg=%.3fms\n",
+                   data->rtt_min, data->rtt_max, rtt_avg);
+
+            if (data->discontinuities > 0) {
+                printf("\033[1;31m[Simulated Audio] ERROR: Detected %u discontinuities in output signal over last 2 seconds\033[0m\n", data->discontinuities);
+            }
+
+            // Reset stats for next interval
+            data->rtt_min = 0.0f;
+            data->rtt_max = 0.0f;
+            data->rtt_sum = 0.0;
+            data->rtt_count = 0;
+            data->discontinuities = 0;
         }
-        
+
         // Simulate precise hardware timing
         nanosleep(&sleep_time, NULL);
     }
@@ -130,8 +202,8 @@ static int simulated_init(audio_backend_t *backend, const audio_config_t *config
     data->total_callbacks = 0;
     
     // Test signal frequency (low frequency for latency measurement)
-    // At 50 Hz, zero crossings are ~10ms apart, good for measuring 0.8-30ms latency
-    data->freq = 50.0;    // 50 Hz sine wave
+    // At 10 Hz, zero crossings are ~100ms apart, good for measuring 0.8-30ms latency
+    data->freq = 10.0;    // 10 Hz sine wave
     data->phase = 0.0;
     
     backend->private_data = data;
