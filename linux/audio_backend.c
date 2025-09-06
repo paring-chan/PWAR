@@ -60,6 +60,8 @@ audio_backend_t* audio_backend_create(audio_backend_type_t type) {
         case AUDIO_BACKEND_PIPEWIRE:
             return audio_backend_create_pipewire();
 #endif
+        case AUDIO_BACKEND_SIMULATED:
+            return audio_backend_create_simulated();
         default:
             return NULL;
     }
@@ -76,6 +78,8 @@ int audio_backend_is_available(audio_backend_type_t type) {
         case AUDIO_BACKEND_PIPEWIRE:
             return 1;
 #endif
+        case AUDIO_BACKEND_SIMULATED:
+            return 1;  // Always available
         default:
             return 0;
     }

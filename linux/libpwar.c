@@ -1,6 +1,8 @@
 // Core PWAR Library - Audio backend agnostic implementation
 // Contains the core PWAR protocol logic without direct audio API dependencies
 
+#define _POSIX_C_SOURCE 199309L  // Enable POSIX time functions
+
 #include "libpwar.h"
 #include "audio_backend.h"
 #include <stdio.h>
@@ -10,6 +12,7 @@
 #include <signal.h>
 #include <string.h>
 #include <time.h>
+#include <sys/time.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -118,8 +121,17 @@ static void *receiver_thread(void *userdata) {
     char recv_buffer[sizeof(pwar_packet_t) > sizeof(pwar_latency_info_t) ? sizeof(pwar_packet_t) : sizeof(pwar_latency_info_t)];
     float output_buffers[NUM_CHANNELS * MAX_BUFFER_SIZE] = {0};
 
+    // Set socket timeout to allow periodic checking of should_stop
+    struct timeval timeout;
+    timeout.tv_sec = 0;
+    timeout.tv_usec = 100000; // 100ms timeout
+    if (setsockopt(data->recv_sockfd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) < 0) {
+        perror("Warning: Failed to set socket timeout");
+    }
+
     while (!data->should_stop) {
         ssize_t n = recvfrom(data->recv_sockfd, recv_buffer, sizeof(recv_buffer), 0, NULL, NULL);
+        
         if (n == (ssize_t)sizeof(pwar_packet_t)) {
             pwar_packet_t *packet = (pwar_packet_t *)recv_buffer;
             latency_manager_process_packet_server(packet);
@@ -143,6 +155,15 @@ static void *receiver_thread(void *userdata) {
         } else if (n == (ssize_t)sizeof(pwar_latency_info_t)) {
             pwar_latency_info_t *latency_info = (pwar_latency_info_t *)recv_buffer;
             latency_manager_handle_latency_info(latency_info);
+        } else if (n < 0) {
+            // Check if it's a timeout (expected) vs a real error
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                // Timeout is expected - just continue and check should_stop
+                continue;
+            } else if (!data->should_stop) {
+                // Only print error if we're not shutting down
+                perror("recvfrom error");
+            }
         }
     }
     return NULL;
@@ -449,11 +470,13 @@ int pwar_cli_run(const pwar_config_t *config) {
     }
 
     printf("PWAR CLI started with %s backend. Press Ctrl+C to stop.\n",
-           config->backend_type == AUDIO_BACKEND_ALSA ? "ALSA" : "PipeWire");
+           config->backend_type == AUDIO_BACKEND_ALSA ? "ALSA" : 
+           config->backend_type == AUDIO_BACKEND_PIPEWIRE ? "PipeWire" : "Simulated");
 
     // Wait for shutdown signal
     while (cli_keep_running) {
-        usleep(100000); // 100ms
+        struct timespec sleep_time = {0, 100000000}; // 100ms
+        nanosleep(&sleep_time, NULL);
     }
 
     printf("\nShutting down PWAR CLI...\n");

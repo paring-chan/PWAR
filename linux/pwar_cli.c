@@ -39,11 +39,12 @@ static void print_usage(const char *program_name) {
     printf("\nBackends:\n");
     printf("  alsa                       Use ALSA for audio I/O\n");
     printf("  pipewire                   Use PipeWire for audio I/O\n");
+    printf("  simulated                  Use simulated audio for testing (no hardware needed)\n");
     printf("\nExamples:\n");
     printf("  %s                         # Use PipeWire with default settings\n", program_name);
     printf("  %s -b alsa -i 192.168.1.100 -p 9000 -f 64\n", program_name);
     printf("  %s --backend pipewire --oneshot --frames 128\n", program_name);
-    printf("  %s -b alsa --passthrough   # ALSA local passthrough test\n", program_name);
+    printf("  %s -b simulated --passthrough   # Test mode without hardware\n", program_name);
 }
 
 static audio_backend_type_t parse_backend(const char *backend_str) {
@@ -51,6 +52,8 @@ static audio_backend_type_t parse_backend(const char *backend_str) {
         return AUDIO_BACKEND_ALSA;
     } else if (strcmp(backend_str, "pipewire") == 0) {
         return AUDIO_BACKEND_PIPEWIRE;
+    } else if (strcmp(backend_str, "simulated") == 0) {
+        return AUDIO_BACKEND_SIMULATED;
     } else {
         return AUDIO_BACKEND_PIPEWIRE; // Default fallback
     }
@@ -120,7 +123,11 @@ int main(int argc, char *argv[]) {
     
     // Validate backend availability
     if (!audio_backend_is_available(config.backend_type)) {
-        const char *backend_name = (config.backend_type == AUDIO_BACKEND_ALSA) ? "ALSA" : "PipeWire";
+        const char *backend_name = "Unknown";
+        if (config.backend_type == AUDIO_BACKEND_ALSA) backend_name = "ALSA";
+        else if (config.backend_type == AUDIO_BACKEND_PIPEWIRE) backend_name = "PipeWire";
+        else if (config.backend_type == AUDIO_BACKEND_SIMULATED) backend_name = "Simulated";
+        
         printf("Error: %s backend is not available (not compiled in)\n", backend_name);
         printf("Available backends:\n");
         if (audio_backend_is_available(AUDIO_BACKEND_ALSA)) {
@@ -128,6 +135,9 @@ int main(int argc, char *argv[]) {
         }
         if (audio_backend_is_available(AUDIO_BACKEND_PIPEWIRE)) {
             printf("  - PipeWire\n");
+        }
+        if (audio_backend_is_available(AUDIO_BACKEND_SIMULATED)) {
+            printf("  - Simulated\n");
         }
         return 1;
     }
@@ -137,7 +147,13 @@ int main(int argc, char *argv[]) {
     printf("  Target: %s:%d\n", config.stream_ip, config.stream_port);
     printf("  Mode: %s\n", config.oneshot_mode ? "oneshot" : "ping-pong");
     printf("  Passthrough test: %s\n", config.passthrough_test ? "enabled" : "disabled");
-    printf("  Backend: %s\n", config.backend_type == AUDIO_BACKEND_ALSA ? "ALSA" : "PipeWire");
+    
+    const char *backend_name = "Unknown";
+    if (config.backend_type == AUDIO_BACKEND_ALSA) backend_name = "ALSA";
+    else if (config.backend_type == AUDIO_BACKEND_PIPEWIRE) backend_name = "PipeWire";
+    else if (config.backend_type == AUDIO_BACKEND_SIMULATED) backend_name = "Simulated";
+    printf("  Backend: %s\n", backend_name);
+    
     printf("  Sample rate: %u Hz\n", config.audio_config.sample_rate);
     printf("  Buffer size: %u frames (%.2f ms)\n", 
            config.audio_config.frames,
@@ -148,8 +164,11 @@ int main(int argc, char *argv[]) {
                config.audio_config.device_capture, config.audio_config.capture_channels);
         printf("  Playback device: %s (%u channels)\n", 
                config.audio_config.device_playback, config.audio_config.playback_channels);
-    } else {
+    } else if (config.backend_type == AUDIO_BACKEND_PIPEWIRE) {
         printf("  Audio I/O: PipeWire filter with %u channels\n", config.audio_config.capture_channels);
+    } else if (config.backend_type == AUDIO_BACKEND_SIMULATED) {
+        printf("  Audio I/O: Simulated audio with %u channels (test signals: 440Hz/880Hz)\n", 
+               config.audio_config.capture_channels);
     }
     printf("\n");
     

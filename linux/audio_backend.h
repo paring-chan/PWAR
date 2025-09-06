@@ -10,7 +10,8 @@ extern "C" {
 // Audio backend types
 typedef enum {
     AUDIO_BACKEND_ALSA,
-    AUDIO_BACKEND_PIPEWIRE
+    AUDIO_BACKEND_PIPEWIRE,
+    AUDIO_BACKEND_SIMULATED     // Always available for testing
 } audio_backend_type_t;
 
 // Audio configuration
@@ -74,6 +75,9 @@ audio_backend_t* audio_backend_create_alsa(void);
 #ifdef HAVE_PIPEWIRE
 audio_backend_t* audio_backend_create_pipewire(void);
 #endif
+
+// Simulated backend (always available for testing)
+audio_backend_t* audio_backend_create_simulated(void);
 
 // Unified factory function (always available)
 audio_backend_t* audio_backend_create(audio_backend_type_t type);

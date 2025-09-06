@@ -49,6 +49,7 @@ set(PROTOCOL_SOURCES
 # Audio backend sources (conditional compilation)
 set(AUDIO_BACKEND_SOURCES
     audio_backend.c
+    simulated_backend.c     # Always available for testing
 )
 
 if(HAVE_ALSA)
@@ -67,6 +68,8 @@ add_library(pwar SHARED
 )
 
 # Set compile definitions based on available backends
+target_compile_definitions(pwar PRIVATE HAVE_SIMULATED=1)  # Always available
+
 if(HAVE_ALSA)
     target_compile_definitions(pwar PRIVATE HAVE_ALSA=1)
     target_include_directories(pwar PRIVATE ${ALSA_INCLUDE_DIRS})
@@ -160,13 +163,13 @@ if(HAVE_PIPEWIRE)
     target_compile_definitions(pwar_torture PRIVATE HAVE_PIPEWIRE=1)
 endif()
 
-# Windows simulator executable (agnostic)
-add_executable(windows_sim
-    windows_sim.c
+# Client simulator executable (agnostic)
+add_executable(client_simulator
+    client_simulator.c
     ${PROTOCOL_SOURCES}
 )
 
-target_link_libraries(windows_sim pwar)
+target_link_libraries(client_simulator pwar)
 
 # Integration test subdirectory
 add_subdirectory(test)
@@ -207,6 +210,8 @@ else()
     message(STATUS "  PipeWire: DISABLED (not found)")
 endif()
 
+message(STATUS "  Simulated: ENABLED (always available for testing)")
+
 message(STATUS "Executables:")
 message(STATUS "  pwar_cli: YES (agnostic)")
 if(Qt5_FOUND)
@@ -215,5 +220,5 @@ else()
     message(STATUS "  pwar_gui: NO (Qt5 not found)")
 endif()
 message(STATUS "  pwar_torture: YES (agnostic)")
-message(STATUS "  windows_sim: YES (agnostic)")
+message(STATUS "  client_simulator: YES (agnostic)")
 message(STATUS "================================")
