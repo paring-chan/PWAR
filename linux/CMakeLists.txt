@@ -1,60 +1,110 @@
-# CMakeLists.txt for Linux targets
+# CMakeLists.txt for Linux targets - Audio Backend Agnostic
 cmake_minimum_required(VERSION 3.15)
 
-# Find required packages
-find_package(PkgConfig REQUIRED)
-pkg_check_modules(PIPEWIRE REQUIRED libpipewire-0.3)
-
-# Find Qt5 for GUI
-find_package(Qt5 COMPONENTS Core Widgets Quick Qml QUIET)
-
-# Math library
+# Math library (always required)
 find_library(MATH_LIB m)
 
-# Find ALSA for ALSA-only build
+# Find required packages with optional fallbacks
 find_package(PkgConfig REQUIRED)
-pkg_check_modules(ALSA REQUIRED alsa)
+
+# Try to find PipeWire (optional)
+pkg_check_modules(PIPEWIRE libpipewire-0.3)
+if(PIPEWIRE_FOUND)
+    message(STATUS "PipeWire found - PipeWire backend will be available")
+    set(HAVE_PIPEWIRE TRUE)
+else()
+    message(STATUS "PipeWire not found - PipeWire backend will be disabled")
+    set(HAVE_PIPEWIRE FALSE)
+endif()
+
+# Try to find ALSA (optional)
+pkg_check_modules(ALSA alsa)
+if(ALSA_FOUND)
+    message(STATUS "ALSA found - ALSA backend will be available")
+    set(HAVE_ALSA TRUE)
+else()
+    message(STATUS "ALSA not found - ALSA backend will be disabled")
+    set(HAVE_ALSA FALSE)
+endif()
+
+# Ensure at least one audio backend is available
+if(NOT HAVE_PIPEWIRE AND NOT HAVE_ALSA)
+    message(FATAL_ERROR "Neither PipeWire nor ALSA found. At least one audio backend is required.")
+endif()
+
+# Find Qt5 for GUI (optional)
+find_package(Qt5 COMPONENTS Core Widgets Quick Qml QUIET)
 
 # Include directories
 include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 include_directories(${CMAKE_SOURCE_DIR}/protocol)
 
-# Protocol sources
+# Protocol sources (backend agnostic)
 set(PROTOCOL_SOURCES
     ${CMAKE_SOURCE_DIR}/protocol/pwar_router.c
     ${CMAKE_SOURCE_DIR}/protocol/pwar_rcv_buffer.c
     ${CMAKE_SOURCE_DIR}/protocol/latency_manager.c
 )
 
-# Build shared library
+# Audio backend sources (conditional compilation)
+set(AUDIO_BACKEND_SOURCES
+    audio_backend.c
+)
+
+if(HAVE_ALSA)
+    list(APPEND AUDIO_BACKEND_SOURCES alsa_backend.c)
+endif()
+
+if(HAVE_PIPEWIRE)
+    list(APPEND AUDIO_BACKEND_SOURCES pipewire_backend.c)
+endif()
+
+# Build shared library with agnostic audio backend support
 add_library(pwar SHARED
     libpwar.c
     ${PROTOCOL_SOURCES}
+    ${AUDIO_BACKEND_SOURCES}
 )
 
-target_include_directories(pwar PRIVATE
-    ${PIPEWIRE_INCLUDE_DIRS}
-)
+# Set compile definitions based on available backends
+if(HAVE_ALSA)
+    target_compile_definitions(pwar PRIVATE HAVE_ALSA=1)
+    target_include_directories(pwar PRIVATE ${ALSA_INCLUDE_DIRS})
+endif()
 
-target_link_libraries(pwar 
-    ${PIPEWIRE_LIBRARIES}
-    ${MATH_LIB}
-)
+if(HAVE_PIPEWIRE)
+    target_compile_definitions(pwar PRIVATE HAVE_PIPEWIRE=1)
+    target_include_directories(pwar PRIVATE ${PIPEWIRE_INCLUDE_DIRS})
+endif()
 
-target_compile_options(pwar PRIVATE ${PIPEWIRE_CFLAGS_OTHER})
+# Link libraries conditionally
+target_link_libraries(pwar ${MATH_LIB} pthread)
 
-# CLI executable
+if(HAVE_ALSA)
+    target_link_libraries(pwar ${ALSA_LIBRARIES})
+    target_compile_options(pwar PRIVATE ${ALSA_CFLAGS_OTHER})
+endif()
+
+if(HAVE_PIPEWIRE)
+    target_link_libraries(pwar ${PIPEWIRE_LIBRARIES})
+    target_compile_options(pwar PRIVATE ${PIPEWIRE_CFLAGS_OTHER})
+endif()
+
+# CLI executable (agnostic)
 add_executable(pwar_cli
     pwar_cli.c
 )
 
-target_link_libraries(pwar_cli
-    pwar
-    ${PIPEWIRE_LIBRARIES}
-    ${MATH_LIB}
-)
+target_link_libraries(pwar_cli pwar)
 
-target_compile_options(pwar_cli PRIVATE ${PIPEWIRE_CFLAGS_OTHER})
+# Set compile definitions for CLI based on available backends
+if(HAVE_ALSA)
+    target_compile_definitions(pwar_cli PRIVATE HAVE_ALSA=1)
+endif()
+
+if(HAVE_PIPEWIRE)
+    target_compile_definitions(pwar_cli PRIVATE HAVE_PIPEWIRE=1)
+endif()
 
 # GUI executable (only if Qt5 is found)
 if(Qt5_FOUND)
@@ -78,61 +128,47 @@ if(Qt5_FOUND)
         Qt5::Widgets
         Qt5::Quick
         Qt5::Qml
-        ${PIPEWIRE_LIBRARIES}
-        ${MATH_LIB}
     )
     
-    target_compile_options(pwar_gui PRIVATE ${PIPEWIRE_CFLAGS_OTHER})
+    # Set compile definitions for GUI based on available backends
+    if(HAVE_ALSA)
+        target_compile_definitions(pwar_gui PRIVATE HAVE_ALSA=1)
+    endif()
+
+    if(HAVE_PIPEWIRE)
+        target_compile_definitions(pwar_gui PRIVATE HAVE_PIPEWIRE=1)
+    endif()
     
     message(STATUS "Qt5 found - building GUI application")
 else()
     message(STATUS "Qt5 not found - skipping GUI application")
 endif()
 
-# Torture test executable
+# Torture test executable (agnostic)
 add_executable(pwar_torture
     torture.c
 )
 
-target_include_directories(pwar_torture PRIVATE
-    ${PIPEWIRE_INCLUDE_DIRS}
-)
+target_link_libraries(pwar_torture pwar)
 
-target_link_libraries(pwar_torture
-    ${PIPEWIRE_LIBRARIES}
-    ${MATH_LIB}
-)
+# Set compile definitions for torture test based on available backends  
+if(HAVE_ALSA)
+    target_compile_definitions(pwar_torture PRIVATE HAVE_ALSA=1)
+endif()
 
-target_compile_options(pwar_torture PRIVATE ${PIPEWIRE_CFLAGS_OTHER})
+if(HAVE_PIPEWIRE)
+    target_compile_definitions(pwar_torture PRIVATE HAVE_PIPEWIRE=1)
+endif()
 
-# Windows simulator executable
+# Windows simulator executable (agnostic)
 add_executable(windows_sim
     windows_sim.c
     ${PROTOCOL_SOURCES}
 )
 
-target_include_directories(windows_sim PRIVATE
-    ${PIPEWIRE_INCLUDE_DIRS}
-)
-
-target_link_libraries(windows_sim
-    ${PIPEWIRE_LIBRARIES}
-    ${MATH_LIB}
-)
-
-target_compile_options(windows_sim PRIVATE ${PIPEWIRE_CFLAGS_OTHER})
+target_link_libraries(windows_sim pwar)
 
 # Integration test subdirectory
-
-# ALSA-only executable with PWAR protocol support
-add_executable(alsa_pwar 
-    alsa_pwar.c
-    ${PROTOCOL_SOURCES}
-)
-target_include_directories(alsa_pwar PRIVATE ${ALSA_INCLUDE_DIRS})
-target_link_libraries(alsa_pwar ${ALSA_LIBRARIES} ${MATH_LIB} pthread)
-target_compile_options(alsa_pwar PRIVATE ${ALSA_CFLAGS_OTHER})
-
 add_subdirectory(test)
 
 # Install targets
@@ -155,3 +191,29 @@ add_custom_target(install-local
     COMMAND ${CMAKE_COMMAND} --install ${CMAKE_BINARY_DIR} --prefix ${CMAKE_SOURCE_DIR}/install
     COMMENT "Installing to local directory for testing"
 )
+
+# Print build configuration summary
+message(STATUS "=== PWAR Build Configuration ===")
+message(STATUS "Audio Backends:")
+if(HAVE_ALSA)
+    message(STATUS "  ALSA: ENABLED")
+else()
+    message(STATUS "  ALSA: DISABLED (not found)")
+endif()
+
+if(HAVE_PIPEWIRE)
+    message(STATUS "  PipeWire: ENABLED")
+else()
+    message(STATUS "  PipeWire: DISABLED (not found)")
+endif()
+
+message(STATUS "Executables:")
+message(STATUS "  pwar_cli: YES (agnostic)")
+if(Qt5_FOUND)
+    message(STATUS "  pwar_gui: YES (agnostic)")
+else()
+    message(STATUS "  pwar_gui: NO (Qt5 not found)")
+endif()
+message(STATUS "  pwar_torture: YES (agnostic)")
+message(STATUS "  windows_sim: YES (agnostic)")
+message(STATUS "================================")

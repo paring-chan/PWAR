@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include "../protocol/pwar_latency_types.h"
+#include "audio_backend.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -16,6 +17,8 @@ typedef struct {
     int passthrough_test;
     int oneshot_mode;
     int buffer_size;
+    audio_backend_type_t backend_type;
+    audio_config_t audio_config;
 } pwar_config_t;
 
 int pwar_cli_run(const pwar_config_t *config);
