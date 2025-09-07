@@ -1,3 +1,7 @@
+// OBSOLETE - see client_simulator.cpp for updated version
+// THIS IS JUST KEPT TO UNDERSTAND HOW IT CAN PEFORM SO MUCH
+// WORSE THAN THE client_simulator.CPP VERSION
+
 /*
  * simulator_main.cpp - PWAR Windows Client Simulator
  *

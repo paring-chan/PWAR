@@ -32,9 +32,9 @@ extern "C" {
 #endif
 
 // Default configuration (matching your existing setup)
-#define DEFAULT_SERVER_IP "127.0.0.1"
+#define DEFAULT_SERVER_IP "196.168.66.2"
 #define DEFAULT_SERVER_PORT 8321
-#define DEFAULT_CLIENT_PORT 8322
+#define DEFAULT_CLIENT_PORT 8321
 #define DEFAULT_CHANNELS 2
 #define DEFAULT_BUFFER_SIZE 512
 
