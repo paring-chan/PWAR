@@ -3,6 +3,7 @@
 #include <cstring>
 #include <QProcess>
 #include <QStandardPaths>
+#include "audio_backend.h"
 
 PwarController::PwarController(QObject *parent) 
     : QObject(parent), m_status("Ready"), m_initialized(false),
@@ -19,6 +20,15 @@ PwarController::PwarController(QObject *parent)
     m_config.stream_port = 8321;
     m_config.passthrough_test = 0;
     m_config.buffer_size = 64;
+    m_config.backend_type = AUDIO_BACKEND_PIPEWIRE;
+    
+    // Initialize audio config for PipeWire
+    m_config.audio_config.device_playback = nullptr;  // PipeWire uses NULL for auto-detection
+    m_config.audio_config.device_capture = nullptr;   // PipeWire uses NULL for auto-detection
+    m_config.audio_config.sample_rate = 48000;
+    m_config.audio_config.frames = 64;
+    m_config.audio_config.playback_channels = 2;
+    m_config.audio_config.capture_channels = 1;
     
     // Populate port lists
     updateInputPorts();
@@ -103,6 +113,7 @@ int PwarController::bufferSize() const {
 void PwarController::setBufferSize(int size) {
     if (m_config.buffer_size != size) {
         m_config.buffer_size = size;
+        m_config.audio_config.frames = size;  // Keep audio config in sync
         emit bufferSizeChanged();
         if (pwar_is_running()) {
             setStatus("Buffer size changed - stop and start to apply");
