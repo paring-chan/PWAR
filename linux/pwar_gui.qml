@@ -193,17 +193,6 @@ ApplicationWindow {
                 }
 
                 Label { 
-                    text: "Oneshot Mode"
-                    color: textPrimary
-                    font.bold: true
-                }
-                CheckBox { 
-                    id: oneshotCheck
-                    checked: pwarController.oneshotMode
-                    onCheckedChanged: pwarController.oneshotMode = checked
-                }
-
-                Label { 
                     text: "Passthrough Test"
                     color: textPrimary
                     font.bold: true

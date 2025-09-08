@@ -11,7 +11,6 @@
 // Default configuration
 #define DEFAULT_STREAM_IP          "192.168.66.3"
 #define DEFAULT_STREAM_PORT        8321
-#define DEFAULT_ONESHOT_MODE       0        // 1 = oneshot, 0 = ping-pong
 #define DEFAULT_PASSTHROUGH_TEST   0        // 1 = local passthrough test
 
 // Audio defaults
@@ -29,7 +28,6 @@ static void print_usage(const char *program_name) {
     printf("  -b, --backend <backend>    Audio backend: alsa or pipewire (default: pipewire)\n");
     printf("  -i, --ip <ip>              Target IP address (default: %s)\n", DEFAULT_STREAM_IP);
     printf("  -p, --port <port>          Target port (default: %d)\n", DEFAULT_STREAM_PORT);
-    printf("  -o, --oneshot              Use oneshot mode (default: ping-pong)\n");
     printf("  -t, --passthrough          Enable passthrough test mode\n");
     printf("  -f, --frames <frames>      Buffer size in frames (default: %d)\n", DEFAULT_FRAMES);
     printf("  -r, --rate <rate>          Sample rate (default: %d)\n", DEFAULT_SAMPLE_RATE);
@@ -43,7 +41,7 @@ static void print_usage(const char *program_name) {
     printf("\nExamples:\n");
     printf("  %s                         # Use PipeWire with default settings\n", program_name);
     printf("  %s -b alsa -i 192.168.1.100 -p 9000 -f 64\n", program_name);
-    printf("  %s --backend pipewire --oneshot --frames 128\n", program_name);
+    printf("  %s --backend pipewire --frames 128\n", program_name);
     printf("  %s -b simulated --passthrough   # Test mode without hardware\n", program_name);
 }
 
@@ -63,7 +61,6 @@ static int parse_arguments(int argc, char *argv[], pwar_config_t *config) {
     // Set defaults
     strcpy(config->stream_ip, DEFAULT_STREAM_IP);
     config->stream_port = DEFAULT_STREAM_PORT;
-    config->oneshot_mode = DEFAULT_ONESHOT_MODE;
     config->passthrough_test = DEFAULT_PASSTHROUGH_TEST;
     config->buffer_size = DEFAULT_FRAMES;
     config->backend_type = AUDIO_BACKEND_PIPEWIRE; // Default to PipeWire
@@ -86,8 +83,6 @@ static int parse_arguments(int argc, char *argv[], pwar_config_t *config) {
             strcpy(config->stream_ip, argv[++i]);
         } else if ((strcmp(argv[i], "-p") == 0 || strcmp(argv[i], "--port") == 0) && i + 1 < argc) {
             config->stream_port = atoi(argv[++i]);
-        } else if (strcmp(argv[i], "-o") == 0 || strcmp(argv[i], "--oneshot") == 0) {
-            config->oneshot_mode = 1;
         } else if (strcmp(argv[i], "-t") == 0 || strcmp(argv[i], "--passthrough") == 0) {
             config->passthrough_test = 1;
         } else if ((strcmp(argv[i], "-f") == 0 || strcmp(argv[i], "--frames") == 0) && i + 1 < argc) {
@@ -145,7 +140,6 @@ int main(int argc, char *argv[]) {
     // Print configuration
     printf("Configuration:\n");
     printf("  Target: %s:%d\n", config.stream_ip, config.stream_port);
-    printf("  Mode: %s\n", config.oneshot_mode ? "oneshot" : "ping-pong");
     printf("  Passthrough test: %s\n", config.passthrough_test ? "enabled" : "disabled");
     
     const char *backend_name = "Unknown";

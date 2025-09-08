@@ -11,7 +11,6 @@ class PwarController : public QObject {
     Q_PROPERTY(QString streamIp READ streamIp WRITE setStreamIp NOTIFY streamIpChanged)
     Q_PROPERTY(int streamPort READ streamPort WRITE setStreamPort NOTIFY streamPortChanged)
     Q_PROPERTY(bool passthroughTest READ passthroughTest WRITE setPassthroughTest NOTIFY passthroughTestChanged)
-    Q_PROPERTY(bool oneshotMode READ oneshotMode WRITE setOneshotMode NOTIFY oneshotModeChanged)
     Q_PROPERTY(int bufferSize READ bufferSize WRITE setBufferSize NOTIFY bufferSizeChanged)
     Q_PROPERTY(QStringList outputPorts READ outputPorts NOTIFY outputPortsChanged)
     Q_PROPERTY(QStringList inputPorts READ inputPorts NOTIFY inputPortsChanged)
@@ -48,8 +47,6 @@ public:
     void setStreamPort(int port);
     bool passthroughTest() const;
     void setPassthroughTest(bool enabled);
-    bool oneshotMode() const;
-    void setOneshotMode(bool enabled);
     int bufferSize() const;
     void setBufferSize(int size);
 
@@ -93,7 +90,6 @@ signals:
     void streamIpChanged();
     void streamPortChanged();
     void passthroughTestChanged();
-    void oneshotModeChanged();
     void bufferSizeChanged();
     void outputPortsChanged();
     void inputPortsChanged();

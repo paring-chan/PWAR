@@ -18,7 +18,6 @@ PwarController::PwarController(QObject *parent)
     strcpy(m_config.stream_ip, "192.168.66.3");
     m_config.stream_port = 8321;
     m_config.passthrough_test = 0;
-    m_config.oneshot_mode = 0;
     m_config.buffer_size = 64;
     
     // Populate port lists
@@ -93,18 +92,6 @@ void PwarController::setPassthroughTest(bool enabled) {
     if (m_config.passthrough_test != enabled) {
         m_config.passthrough_test = enabled;
         emit passthroughTestChanged();
-        applyRuntimeConfig();
-    }
-}
-
-bool PwarController::oneshotMode() const {
-    return m_config.oneshot_mode;
-}
-
-void PwarController::setOneshotMode(bool enabled) {
-    if (m_config.oneshot_mode != enabled) {
-        m_config.oneshot_mode = enabled;
-        emit oneshotModeChanged();
         applyRuntimeConfig();
     }
 }
@@ -256,9 +243,6 @@ void PwarController::loadSettings() {
     bool savedPassthrough = m_settings->value("audio/passthroughTest", m_config.passthrough_test).toBool();
     setPassthroughTest(savedPassthrough);
     
-    bool savedOneshot = m_settings->value("audio/oneshotMode", m_config.oneshot_mode).toBool();
-    setOneshotMode(savedOneshot);
-    
     int savedBufferSize = m_settings->value("audio/bufferSize", m_config.buffer_size).toInt();
     setBufferSize(savedBufferSize);
     
@@ -282,7 +266,6 @@ void PwarController::saveSettings() {
     
     // Save audio settings
     m_settings->setValue("audio/passthroughTest", passthroughTest());
-    m_settings->setValue("audio/oneshotMode", oneshotMode());
     m_settings->setValue("audio/bufferSize", bufferSize());
     
     // Save port selections

@@ -15,7 +15,6 @@ typedef struct {
     char stream_ip[PWAR_MAX_IP_LEN];
     int stream_port;
     int passthrough_test;
-    int oneshot_mode;
     int buffer_size;
     audio_backend_type_t backend_type;
     audio_config_t audio_config;

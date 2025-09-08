@@ -51,10 +51,6 @@ struct pwar_core_data {
     
     // PWAR protocol state
     uint32_t seq;
-    pthread_mutex_t packet_mutex;
-    pthread_cond_t packet_cond;
-    pwar_packet_t latest_packet;
-    int packet_available;
     
     pwar_router_t router;
     pthread_mutex_t pwar_rcv_mutex;
@@ -69,8 +65,6 @@ static void setup_recv_socket(struct pwar_core_data *data, int port);
 static void *receiver_thread(void *userdata);
 static void audio_process_callback(float *in, float *out_left, float *out_right, 
                                  uint32_t n_samples, void *userdata);
-static void process_one_shot(struct pwar_core_data *data, float *in, uint32_t n_samples, 
-                           float *left_out, float *right_out);
 static void process_ping_pong(struct pwar_core_data *data, float *in, uint32_t n_samples, 
                             float *left_out, float *right_out);
 
@@ -137,20 +131,12 @@ static void *receiver_thread(void *userdata) {
             latency_manager_process_packet_server(packet);
             data->current_windows_buffer_size = packet->n_samples * packet->num_packets;
             
-            if (data->config.oneshot_mode) {
-                pthread_mutex_lock(&data->packet_mutex);
-                data->latest_packet = *packet;
-                data->packet_available = 1;
-                pthread_cond_signal(&data->packet_cond);
-                pthread_mutex_unlock(&data->packet_mutex);
-            } else {
-                int samples_ready = pwar_router_process_packet(&data->router, packet, output_buffers, 
-                                                               MAX_BUFFER_SIZE, NUM_CHANNELS);
-                if (samples_ready > 0) {
-                    pthread_mutex_lock(&data->pwar_rcv_mutex);
-                    pwar_rcv_buffer_add_buffer(output_buffers, samples_ready, NUM_CHANNELS);
-                    pthread_mutex_unlock(&data->pwar_rcv_mutex);
-                }
+            int samples_ready = pwar_router_process_packet(&data->router, packet, output_buffers, 
+                                                           MAX_BUFFER_SIZE, NUM_CHANNELS);
+            if (samples_ready > 0) {
+                pthread_mutex_lock(&data->pwar_rcv_mutex);
+                pwar_rcv_buffer_add_buffer(output_buffers, samples_ready, NUM_CHANNELS);
+                pthread_mutex_unlock(&data->pwar_rcv_mutex);
             }
         } else if (n == (ssize_t)sizeof(pwar_latency_info_t)) {
             pwar_latency_info_t *latency_info = (pwar_latency_info_t *)recv_buffer;
@@ -180,68 +166,7 @@ static void audio_process_callback(float *in, float *out_left, float *out_right,
         return;
     }
 
-    if (data->config.oneshot_mode) {
-        process_one_shot(data, in, n_samples, out_left, out_right);
-    } else {
-        process_ping_pong(data, in, n_samples, out_left, out_right);
-    }
-}
-
-static void process_one_shot(struct pwar_core_data *data, float *in, uint32_t n_samples, 
-                           float *left_out, float *right_out) {
-    // Send input to Windows
-    pwar_packet_t packet;
-    packet.seq = data->seq++;
-    packet.n_samples = n_samples;
-    packet.packet_index = 0;
-    packet.num_packets = 1;
-    
-    // Copy input samples to both channels
-    memcpy(packet.samples[0], in, n_samples * sizeof(float));
-    memcpy(packet.samples[1], in, n_samples * sizeof(float));
-    
-    packet.timestamp = latency_manager_timestamp_now();
-    packet.seq_timestamp = packet.timestamp;
-    
-    if (sendto(data->sockfd, &packet, sizeof(packet), 0, 
-               (struct sockaddr *)&data->servaddr, sizeof(data->servaddr)) < 0) {
-        perror("sendto failed");
-        return;
-    }
-    
-    // Wait for response with timeout
-    int got_packet = 0;
-    struct timespec ts;
-    clock_gettime(CLOCK_REALTIME, &ts);
-    ts.tv_nsec += 2 * 1000 * 1000; // 2ms timeout
-    if (ts.tv_nsec >= 1000000000) {
-        ts.tv_sec += 1;
-        ts.tv_nsec -= 1000000000;
-    }
-    
-    pthread_mutex_lock(&data->packet_mutex);
-    while (!data->packet_available) {
-        int rc = pthread_cond_timedwait(&data->packet_cond, &data->packet_mutex, &ts);
-        if (rc == ETIMEDOUT)
-            break;
-    }
-    
-    if (data->packet_available) {
-        // Copy received samples to output
-        if (left_out) memcpy(left_out, data->latest_packet.samples[0], n_samples * sizeof(float));
-        if (right_out) memcpy(right_out, data->latest_packet.samples[1], n_samples * sizeof(float));
-        got_packet = 1;
-        data->packet_available = 0;
-    }
-    pthread_mutex_unlock(&data->packet_mutex);
-    
-    if (!got_packet) {
-        latency_manager_report_xrun();
-        printf("\033[0;31m--- ERROR -- No valid packet received, outputting silence\n");
-        printf("Wanted seq: %u, got seq: %lu\033[0m\n", data->seq - 1, data->latest_packet.seq);
-        if (left_out) memset(left_out, 0, n_samples * sizeof(float));
-        if (right_out) memset(right_out, 0, n_samples * sizeof(float));
-    }
+    process_ping_pong(data, in, n_samples, out_left, out_right);
 }
 
 static void process_ping_pong(struct pwar_core_data *data, float *in, uint32_t n_samples, 
@@ -291,9 +216,6 @@ static int init_core_data(struct pwar_core_data *data, const pwar_config_t *conf
     setup_socket(data, config->stream_ip, config->stream_port);
     setup_recv_socket(data, DEFAULT_STREAM_PORT);
     
-    pthread_mutex_init(&data->packet_mutex, NULL);
-    pthread_cond_init(&data->packet_cond, NULL);
-    data->packet_available = 0;
     pthread_mutex_init(&data->pwar_rcv_mutex, NULL);
     
     data->seq = 0;
@@ -352,7 +274,6 @@ int pwar_update_config(const pwar_config_t *config) {
 
     // Apply runtime-changeable settings
     g_pwar_data->config.passthrough_test = config->passthrough_test;
-    g_pwar_data->config.oneshot_mode = config->oneshot_mode;
     g_current_config = *config;
     
     return 0;
@@ -429,8 +350,6 @@ void pwar_cleanup(void) {
             close(g_pwar_data->recv_sockfd);
         }
 
-        pthread_mutex_destroy(&g_pwar_data->packet_mutex);
-        pthread_cond_destroy(&g_pwar_data->packet_cond);
         pthread_mutex_destroy(&g_pwar_data->pwar_rcv_mutex);
 
         free(g_pwar_data);
@@ -490,8 +409,6 @@ int pwar_cli_run(const pwar_config_t *config) {
     if (data.sockfd > 0) close(data.sockfd);
     if (data.recv_sockfd > 0) close(data.recv_sockfd);
 
-    pthread_mutex_destroy(&data.packet_mutex);
-    pthread_cond_destroy(&data.packet_cond);
     pthread_mutex_destroy(&data.pwar_rcv_mutex);
 
     return 0;
