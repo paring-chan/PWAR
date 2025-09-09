@@ -21,8 +21,7 @@
 
 #include "../protocol/latency_manager.h"
 #include "../protocol/pwar_packet.h"
-#include "../protocol/pwar_router.h"
-#include "../protocol/pwar_rcv_buffer.h"
+#include "../protocol/pwar_ring_buffer.h"
 
 #define DEFAULT_STREAM_IP "192.168.66.3"
 #define DEFAULT_STREAM_PORT 8321
@@ -51,9 +50,6 @@ struct pwar_core_data {
     
     // PWAR protocol state
     uint32_t seq;
-    
-    pwar_router_t router;
-    pthread_mutex_t pwar_rcv_mutex;
     
     uint32_t current_windows_buffer_size;
     volatile int should_stop;
@@ -131,12 +127,17 @@ static void *receiver_thread(void *userdata) {
             latency_manager_process_packet_server(packet);
             data->current_windows_buffer_size = packet->n_samples * packet->num_packets;
             
-            int samples_ready = pwar_router_process_packet(&data->router, packet, output_buffers, 
-                                                           MAX_BUFFER_SIZE, NUM_CHANNELS);
-            if (samples_ready > 0) {
-                pthread_mutex_lock(&data->pwar_rcv_mutex);
-                pwar_rcv_buffer_add_buffer(output_buffers, samples_ready, NUM_CHANNELS);
-                pthread_mutex_unlock(&data->pwar_rcv_mutex);
+            // Direct push to ring buffer - assume single packet for now
+            // Convert from packet format to channel-major format
+            for (uint32_t ch = 0; ch < NUM_CHANNELS; ch++) {
+                for (uint32_t i = 0; i < packet->n_samples; i++) {
+                    output_buffers[ch * packet->n_samples + i] = packet->samples[ch][i];
+                }
+            }
+            
+            if (!pwar_ring_buffer_push(output_buffers, packet->n_samples, NUM_CHANNELS)) {
+                // Ring buffer full - this is an overrun
+                printf("\033[0;31m--- OVERRUN -- Ring buffer full, dropping samples\033[0m\n");
             }
         } else if (n == (ssize_t)sizeof(pwar_latency_info_t)) {
             pwar_latency_info_t *latency_info = (pwar_latency_info_t *)recv_buffer;
@@ -185,23 +186,19 @@ static void process_ping_pong(struct pwar_core_data *data, float *in, uint32_t n
     packet.timestamp = latency_manager_timestamp_now();
     packet.seq_timestamp = packet.timestamp;
     
-    pthread_mutex_lock(&data->pwar_rcv_mutex);
-    
     if (sendto(data->sockfd, &packet, sizeof(packet), 0, 
                (struct sockaddr *)&data->servaddr, sizeof(data->servaddr)) < 0) {
         perror("sendto failed");
     }
     
-    // Get processed samples from previous iteration
+    // Get processed samples from ring buffer
     float rcv_buffers[NUM_CHANNELS * n_samples];
     memset(rcv_buffers, 0, sizeof(rcv_buffers));
     
-    if (!pwar_rcv_get_chunk(rcv_buffers, NUM_CHANNELS, n_samples)) {
-        printf("\033[0;31m--- ERROR -- No valid buffer ready, outputting silence\033[0m\n");
+    if (!pwar_ring_buffer_pop(rcv_buffers, n_samples, NUM_CHANNELS)) {
+        printf("\033[0;31m--- UNDERRUN -- No samples available in ring buffer, outputting silence\033[0m\n");
         latency_manager_report_xrun();
     }
-    
-    pthread_mutex_unlock(&data->pwar_rcv_mutex);
     
     // Copy to output channels
     if (left_out) memcpy(left_out, rcv_buffers, n_samples * sizeof(float));
@@ -216,10 +213,10 @@ static int init_core_data(struct pwar_core_data *data, const pwar_config_t *conf
     setup_socket(data, config->stream_ip, config->stream_port);
     setup_recv_socket(data, DEFAULT_STREAM_PORT);
     
-    pthread_mutex_init(&data->pwar_rcv_mutex, NULL);
-    
     data->seq = 0;
-    pwar_router_init(&data->router, NUM_CHANNELS);
+    
+    // Initialize ring buffer with configured depth
+    pwar_ring_buffer_init(config->ring_buffer_depth, NUM_CHANNELS);
     
     // Create appropriate audio backend using unified factory
     if (!audio_backend_is_available(config->backend_type)) {
@@ -255,6 +252,7 @@ static void cli_sigint_handler(int sig) {
 // Public API Implementation
 int pwar_requires_restart(const pwar_config_t *old_config, const pwar_config_t *new_config) {
     if (old_config->buffer_size != new_config->buffer_size ||
+        old_config->ring_buffer_depth != new_config->ring_buffer_depth ||
         strcmp(old_config->stream_ip, new_config->stream_ip) != 0 ||
         old_config->stream_port != new_config->stream_port ||
         old_config->backend_type != new_config->backend_type) {
@@ -350,7 +348,7 @@ void pwar_cleanup(void) {
             close(g_pwar_data->recv_sockfd);
         }
 
-        pthread_mutex_destroy(&g_pwar_data->pwar_rcv_mutex);
+        pwar_ring_buffer_free();
 
         free(g_pwar_data);
         g_pwar_data = NULL;
@@ -409,7 +407,7 @@ int pwar_cli_run(const pwar_config_t *config) {
     if (data.sockfd > 0) close(data.sockfd);
     if (data.recv_sockfd > 0) close(data.recv_sockfd);
 
-    pthread_mutex_destroy(&data.pwar_rcv_mutex);
+    pwar_ring_buffer_free();
 
     return 0;
 }

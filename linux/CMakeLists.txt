@@ -42,7 +42,7 @@ include_directories(${CMAKE_SOURCE_DIR}/protocol)
 # Protocol sources (backend agnostic)
 set(PROTOCOL_SOURCES
     ${CMAKE_SOURCE_DIR}/protocol/pwar_router.c
-    ${CMAKE_SOURCE_DIR}/protocol/pwar_rcv_buffer.c
+    ${CMAKE_SOURCE_DIR}/protocol/pwar_ring_buffer.c
     ${CMAKE_SOURCE_DIR}/protocol/latency_manager.c
 )
 

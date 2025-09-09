@@ -16,6 +16,7 @@ typedef struct {
     int stream_port;
     int passthrough_test;
     int buffer_size;
+    int ring_buffer_depth;  // Depth of the ring buffer for audio processing
     audio_backend_type_t backend_type;
     audio_config_t audio_config;
 } pwar_config_t;

@@ -20,6 +20,7 @@ PwarController::PwarController(QObject *parent)
     m_config.stream_port = 8321;
     m_config.passthrough_test = 0;
     m_config.buffer_size = 64;
+    m_config.ring_buffer_depth = 2048;
     m_config.backend_type = AUDIO_BACKEND_PIPEWIRE;
     
     // Initialize audio config for PipeWire
@@ -117,6 +118,20 @@ void PwarController::setBufferSize(int size) {
         emit bufferSizeChanged();
         if (pwar_is_running()) {
             setStatus("Buffer size changed - stop and start to apply");
+        }
+    }
+}
+
+int PwarController::ringBufferDepth() const {
+    return m_config.ring_buffer_depth;
+}
+
+void PwarController::setRingBufferDepth(int depth) {
+    if (m_config.ring_buffer_depth != depth) {
+        m_config.ring_buffer_depth = depth;
+        emit ringBufferDepthChanged();
+        if (pwar_is_running()) {
+            setStatus("Ring buffer depth changed - stop and start to apply");
         }
     }
 }
@@ -257,6 +272,9 @@ void PwarController::loadSettings() {
     int savedBufferSize = m_settings->value("audio/bufferSize", m_config.buffer_size).toInt();
     setBufferSize(savedBufferSize);
     
+    int savedRingBufferDepth = m_settings->value("audio/ringBufferDepth", m_config.ring_buffer_depth).toInt();
+    setRingBufferDepth(savedRingBufferDepth);
+    
     // Load port selections
     m_selectedInputPort = m_settings->value("audio/selectedInputPort", "").toString();
     m_selectedOutputLeftPort = m_settings->value("audio/selectedOutputLeftPort", "").toString();
@@ -278,6 +296,7 @@ void PwarController::saveSettings() {
     // Save audio settings
     m_settings->setValue("audio/passthroughTest", passthroughTest());
     m_settings->setValue("audio/bufferSize", bufferSize());
+    m_settings->setValue("audio/ringBufferDepth", ringBufferDepth());
     
     // Save port selections
     m_settings->setValue("audio/selectedInputPort", m_selectedInputPort);

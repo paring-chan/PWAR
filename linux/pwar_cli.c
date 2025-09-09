@@ -12,6 +12,7 @@
 #define DEFAULT_STREAM_IP          "192.168.66.3"
 #define DEFAULT_STREAM_PORT        8321
 #define DEFAULT_PASSTHROUGH_TEST   0        // 1 = local passthrough test
+#define DEFAULT_RING_BUFFER_DEPTH  2048     // Ring buffer depth in samples
 
 // Audio defaults
 #define DEFAULT_SAMPLE_RATE         48000
@@ -31,6 +32,7 @@ static void print_usage(const char *program_name) {
     printf("  -t, --passthrough          Enable passthrough test mode\n");
     printf("  -f, --frames <frames>      Buffer size in frames (default: %d)\n", DEFAULT_FRAMES);
     printf("  -r, --rate <rate>          Sample rate (default: %d)\n", DEFAULT_SAMPLE_RATE);
+    printf("  -d, --ring-depth <depth>   Ring buffer depth in samples (default: %d)\n", DEFAULT_RING_BUFFER_DEPTH);
     printf("  --capture-device <device>  ALSA capture device (ALSA only, default: %s)\n", DEFAULT_PCM_DEVICE_CAPTURE);
     printf("  --playback-device <device> ALSA playback device (ALSA only, default: %s)\n", DEFAULT_PCM_DEVICE_PLAYBACK);
     printf("  -h, --help                 Show this help message\n");
@@ -63,6 +65,7 @@ static int parse_arguments(int argc, char *argv[], pwar_config_t *config) {
     config->stream_port = DEFAULT_STREAM_PORT;
     config->passthrough_test = DEFAULT_PASSTHROUGH_TEST;
     config->buffer_size = DEFAULT_FRAMES;
+    config->ring_buffer_depth = DEFAULT_RING_BUFFER_DEPTH;
     config->backend_type = AUDIO_BACKEND_PIPEWIRE; // Default to PipeWire
     
     // Audio config defaults
@@ -91,6 +94,8 @@ static int parse_arguments(int argc, char *argv[], pwar_config_t *config) {
             config->audio_config.frames = frames;
         } else if ((strcmp(argv[i], "-r") == 0 || strcmp(argv[i], "--rate") == 0) && i + 1 < argc) {
             config->audio_config.sample_rate = atoi(argv[++i]);
+        } else if ((strcmp(argv[i], "-d") == 0 || strcmp(argv[i], "--ring-depth") == 0) && i + 1 < argc) {
+            config->ring_buffer_depth = atoi(argv[++i]);
         } else if (strcmp(argv[i], "--capture-device") == 0 && i + 1 < argc) {
             config->audio_config.device_capture = argv[++i];
         } else if (strcmp(argv[i], "--playback-device") == 0 && i + 1 < argc) {
@@ -152,6 +157,9 @@ int main(int argc, char *argv[]) {
     printf("  Buffer size: %u frames (%.2f ms)\n", 
            config.audio_config.frames,
            (double)config.audio_config.frames * 1000.0 / config.audio_config.sample_rate);
+    printf("  Ring buffer depth: %d samples (%.2f ms)\n", 
+           config.ring_buffer_depth,
+           (double)config.ring_buffer_depth * 1000.0 / config.audio_config.sample_rate);
     
     if (config.backend_type == AUDIO_BACKEND_ALSA) {
         printf("  Capture device: %s (%u channels)\n", 

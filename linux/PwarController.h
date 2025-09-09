@@ -12,6 +12,7 @@ class PwarController : public QObject {
     Q_PROPERTY(int streamPort READ streamPort WRITE setStreamPort NOTIFY streamPortChanged)
     Q_PROPERTY(bool passthroughTest READ passthroughTest WRITE setPassthroughTest NOTIFY passthroughTestChanged)
     Q_PROPERTY(int bufferSize READ bufferSize WRITE setBufferSize NOTIFY bufferSizeChanged)
+    Q_PROPERTY(int ringBufferDepth READ ringBufferDepth WRITE setRingBufferDepth NOTIFY ringBufferDepthChanged)
     Q_PROPERTY(QStringList outputPorts READ outputPorts NOTIFY outputPortsChanged)
     Q_PROPERTY(QStringList inputPorts READ inputPorts NOTIFY inputPortsChanged)
     Q_PROPERTY(QString selectedInputPort READ selectedInputPort WRITE setSelectedInputPort NOTIFY selectedInputPortChanged)
@@ -49,6 +50,8 @@ public:
     void setPassthroughTest(bool enabled);
     int bufferSize() const;
     void setBufferSize(int size);
+    int ringBufferDepth() const;
+    void setRingBufferDepth(int depth);
 
     QStringList outputPorts() const;
     QStringList inputPorts() const;
@@ -91,6 +94,7 @@ signals:
     void streamPortChanged();
     void passthroughTestChanged();
     void bufferSizeChanged();
+    void ringBufferDepthChanged();
     void outputPortsChanged();
     void inputPortsChanged();
     void selectedInputPortChanged();
