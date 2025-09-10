@@ -21,7 +21,6 @@
 #include "pwarASIOLog.h"
 
 #include "../../protocol/pwar_packet.h"
-#include "../../protocol/pwar_router.h"
 #include "../../protocol/latency_manager.h"
 
 #include <avrt.h>
@@ -371,8 +370,8 @@ error:
         return ASE_NoMemory;
     }
     this->callbacks = callbacks;
-    // Initialize the router with the number of output channels
-    pwar_router_init(&router, PWAR_MAX_CHANNELS);
+    // Initialize latency manager with sample rate and buffer size
+    latency_manager_init(static_cast<int>(sampleRate), blockFrames);
     input_buffers = new float[PWAR_MAX_CHANNELS * blockFrames];
     output_buffers = new float[PWAR_MAX_CHANNELS * blockFrames];
 
@@ -491,68 +490,43 @@ ASIOError pwarASIO::outputReady() {
 
 void pwarASIO::udp_iocp_listener() {
     WSADATA wsaData;
-    SOCKET sockfd;
+    SOCKET sockfd = INVALID_SOCKET;
     sockaddr_in servaddr{};
-    char buffer[2048];
-    HANDLE iocp = NULL;
     
-    // --- Raise thread priority and register with MMCSS ---
-    SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL);
-    DWORD mmcssTaskIndex = 0;
-    HANDLE mmcssHandle = AvSetMmThreadCharacteristicsA("Pro Audio", &mmcssTaskIndex);
-    
-    if (GetThreadPriority(GetCurrentThread()) != THREAD_PRIORITY_TIME_CRITICAL) {
-        pwarASIOLog::Send("Warning: Thread priority not set to TIME_CRITICAL!");
-    } else {
-        pwarASIOLog::Send("IOCP Thread priority set to TIME_CRITICAL.");
-    }
-    
-    if (!mmcssHandle) {
-        pwarASIOLog::Send("Warning: MMCSS registration failed!");
-    } else {
-        pwarASIOLog::Send("IOCP MMCSS registration succeeded.");
+    // Set thread priority to high for better real-time performance
+    if (!SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST)) {
+        pwarASIOLog::Send("Warning: Failed to set high thread priority");
     }
 
     if (WSAStartup(MAKEWORD(2,2), &wsaData) != 0) {
-        if (mmcssHandle) AvRevertMmThreadCharacteristics(mmcssHandle);
+        pwarASIOLog::Send("WSAStartup failed in UDP listener");
         return;
     }
 
-    // Create I/O Completion Port
-    iocp = CreateIoCompletionPort(INVALID_HANDLE_VALUE, NULL, 0, 1);
-    if (!iocp) {
-        pwarASIOLog::Send("Failed to create IOCP!");
-        WSACleanup();
-        if (mmcssHandle) AvRevertMmThreadCharacteristics(mmcssHandle);
-        return;
-    }
-
-    sockfd = WSASocket(AF_INET, SOCK_DGRAM, IPPROTO_UDP, NULL, 0, WSA_FLAG_OVERLAPPED);
+    sockfd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if (sockfd == INVALID_SOCKET) {
-        CloseHandle(iocp);
+        pwarASIOLog::Send("recv socket creation failed");
         WSACleanup();
-        if (mmcssHandle) AvRevertMmThreadCharacteristics(mmcssHandle);
         return;
     }
-
-    // Associate socket with IOCP
-    if (!CreateIoCompletionPort((HANDLE)sockfd, iocp, (ULONG_PTR)sockfd, 0)) {
-        pwarASIOLog::Send("Failed to associate socket with IOCP!");
-        closesocket(sockfd);
-        CloseHandle(iocp);
-        WSACleanup();
-        if (mmcssHandle) AvRevertMmThreadCharacteristics(mmcssHandle);
-        return;
-    }
-
-    // Set minimal buffer sizes for ultra-low latency
-    int rcvbuf = 1024;
-    setsockopt(sockfd, SOL_SOCKET, SO_RCVBUF, (const char*)&rcvbuf, sizeof(rcvbuf));
     
-    // Disable UDP connection reset behavior
-    DWORD bytesReturned = 0;
-    BOOL bNewBehavior = FALSE;
-    WSAIoctl(sockfd, SIO_UDP_CONNRESET, &bNewBehavior, sizeof(bNewBehavior), NULL, 0, &bytesReturned, NULL, NULL);
+    // Disable ICMP port unreachable messages
+    BOOL new_behavior = FALSE;
+    DWORD bytes_returned = 0;
+    WSAIoctl(sockfd, SIO_UDP_CONNRESET, &new_behavior, sizeof(new_behavior),
+             NULL, 0, &bytes_returned, NULL, NULL);
+    
+    // Set socket options for better performance
+    int rcvbuf = 1024 * 1024;
+    if (setsockopt(sockfd, SOL_SOCKET, SO_RCVBUF, (char*)&rcvbuf, sizeof(rcvbuf)) == SOCKET_ERROR) {
+        pwarASIOLog::Send("Warning: Failed to set receive buffer size");
+    }
+    
+    // Set socket timeout to allow periodic checking of running flag
+    DWORD timeout = 100; // 100ms timeout
+    if (setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, (char*)&timeout, sizeof(timeout)) == SOCKET_ERROR) {
+        pwarASIOLog::Send("Warning: Failed to set socket timeout");
+    }
 
     // Bind socket
     memset(&servaddr, 0, sizeof(servaddr));
@@ -561,151 +535,96 @@ void pwarASIO::udp_iocp_listener() {
     servaddr.sin_port = htons(8321);
     
     if (bind(sockfd, reinterpret_cast<sockaddr*>(&servaddr), sizeof(servaddr)) == SOCKET_ERROR) {
+        pwarASIOLog::Send("recv socket bind failed");
         closesocket(sockfd);
-        CloseHandle(iocp);
         WSACleanup();
-        if (mmcssHandle) AvRevertMmThreadCharacteristics(mmcssHandle);
         return;
     }
 
+    pwarASIOLog::Send("UDP listener started on port 8321");
     udpListenerRunning = true;
-    pwar_packet_t output_packets[32];
-    uint32_t packets_to_send = 0;
-
-    // Overlapped structure for async operations
-    OVERLAPPED overlapped = {0};
-    WSABUF wsaBuf;
-    wsaBuf.buf = buffer;
-    wsaBuf.len = sizeof(buffer);
-    DWORD bytesReceived = 0;
-    DWORD flags = 0;
-    sockaddr_in cliaddr{};
-    int len = sizeof(cliaddr);
     
-    // Start the first async receive
-    int result = WSARecvFrom(sockfd, &wsaBuf, 1, &bytesReceived, &flags, 
-                            reinterpret_cast<sockaddr*>(&cliaddr), &len, &overlapped, NULL);
-    
-    if (result == SOCKET_ERROR && WSAGetLastError() != WSA_IO_PENDING) {
-        pwarASIOLog::Send("Initial WSARecvFrom failed!");
-        closesocket(sockfd);
-        CloseHandle(iocp);
-        WSACleanup();
-        if (mmcssHandle) AvRevertMmThreadCharacteristics(mmcssHandle);
-        return;
-    }
+    pwar_packet_t packet;
+    pwar_packet_t response_packet;
+    uint64_t packets_processed = 0;
 
     while (udpListenerRunning) {
-        DWORD dwBytesTransferred = 0;
-        ULONG_PTR dwCompletionKey = 0;
-        LPOVERLAPPED lpOverlapped = NULL;
+        int n = recvfrom(sockfd, (char*)&packet, sizeof(packet), 0, NULL, NULL);
         
-        // Wait for completion with minimal timeout for responsiveness
-        BOOL success = GetQueuedCompletionStatus(iocp, &dwBytesTransferred, &dwCompletionKey, 
-                                                &lpOverlapped, 1); // 1ms timeout
-        
-        if (success && lpOverlapped && dwBytesTransferred >= sizeof(pwar_packet_t)) {
-            // Process the received packet
-            pwar_packet_t pkt;
-            memcpy(&pkt, buffer, sizeof(pwar_packet_t));
-
-            uint32_t chunk_size = pkt.n_samples;
-            pkt.num_packets = blockFrames / chunk_size;
-            latency_manager_process_packet_client(&pkt);
-
-            int samples_ready = pwar_router_process_streaming_packet(&router, &pkt, input_buffers, blockFrames, PWAR_MAX_CHANNELS);
-
-            if (started && (samples_ready > 0)) {
-                uint32_t seq = pkt.seq;
-                latency_manager_start_audio_cbk_begin();
-
-                // Process ASIO input buffers
-                size_t to_copy = blockFrames;
-                for (long i = 0; i < activeInputs; ++i) {
+        if (n == sizeof(packet)) {
+            // Set Windows receive timestamp
+            packet.t2_windows_recv = latency_manager_timestamp_now();
+            
+            if (started && callbacks) {
+                // Copy audio data from packet to ASIO input buffers
+                for (long i = 0; i < activeInputs && i < PWAR_CHANNELS; ++i) {
                     float* dest = inputBuffers[i] + (toggle ? blockFrames : 0);
-                    memcpy(dest, input_buffers, to_copy * sizeof(float));
-                    for (size_t j = to_copy; j < blockFrames; ++j)
+                    // Copy samples from packet (channel-separated)
+                    for (int j = 0; j < blockFrames && j < packet.n_samples; ++j) {
+                        dest[j] = packet.samples[i][j];
+                    }
+                    // Fill remaining with zeros if packet has fewer samples
+                    for (int j = packet.n_samples; j < blockFrames; ++j) {
                         dest[j] = 0.0f;
+                    }
                 }
+                
                 samplePosition += blockFrames;
 
+                // Call ASIO buffer switch
                 if (timeInfoMode) {
                     bufferSwitchX();
                 } else {
                     callbacks->bufferSwitch(toggle, ASIOFalse);
                 }
 
-                latency_manager_start_audio_cbk_end();
-
-                // Process ASIO output buffers
-                float* outputSamplesCh1 = outputBuffers[0] + (toggle ? blockFrames : 0);
-                float* outputSamplesCh2 = outputBuffers[1] + (toggle ? blockFrames : 0);
-                memcpy(output_buffers, outputSamplesCh1, blockFrames * sizeof(float));
-                memcpy(output_buffers + blockFrames, outputSamplesCh2, blockFrames * sizeof(float));
-
-                // Send the result
-                pwar_router_send_buffer(&router, chunk_size, output_buffers, samples_ready, PWAR_MAX_CHANNELS, output_packets, 32, &packets_to_send);
-
-                uint64_t timestamp = latency_manager_timestamp_now();
-                for (uint32_t i = 0; i < packets_to_send; ++i) {
-                    output_packets[i].seq = seq;
-                    output_packets[i].timestamp = timestamp;
-                    output(output_packets[i]);
+                // Copy ASIO output buffers to response packet
+                response_packet = packet; // Copy structure
+                response_packet.t3_windows_send = latency_manager_timestamp_now();
+                
+                // Copy output samples (channel-separated)
+                float* outputCh1 = outputBuffers[0] + (toggle ? blockFrames : 0);
+                float* outputCh2 = (activeOutputs > 1) ? outputBuffers[1] + (toggle ? blockFrames : 0) : outputCh1;
+                
+                for (int j = 0; j < blockFrames && j < response_packet.n_samples; ++j) {
+                    response_packet.samples[0][j] = outputCh1[j];
+                    response_packet.samples[1][j] = outputCh2[j];
                 }
-                toggle = toggle ? 0 : 1;
-
-                // Send latency info if needed
-                pwar_latency_info_t latency_info;
-                if (latency_manager_time_for_sending_latency_info(&latency_info)) {
-                    if (udpSendSocket != INVALID_SOCKET) {
-                        WSABUF latencyBuffer;
-                        latencyBuffer.buf = reinterpret_cast<CHAR*>(&latency_info);
-                        latencyBuffer.len = sizeof(latency_info);
-                        DWORD bytesSent = 0;
-                        int sendFlags = 0;
-                        WSASendTo(udpSendSocket, &latencyBuffer, 1, &bytesSent, sendFlags,
-                                  reinterpret_cast<sockaddr*>(&udpSendAddr), sizeof(udpSendAddr), NULL, NULL);
+                
+                // Send response packet back to server
+                int sent = sendto(udpSendSocket, (char*)&response_packet, sizeof(response_packet), 0, 
+                                (struct sockaddr *)&udpSendAddr, sizeof(udpSendAddr));
+                if (sent == SOCKET_ERROR) {
+                    int error = WSAGetLastError();
+                    if (error != WSAEWOULDBLOCK) {
+                        char errMsg[256];
+                        sprintf(errMsg, "sendto failed: %d", error);
+                        pwarASIOLog::Send(errMsg);
                     }
                 }
+                
+                toggle = toggle ? 0 : 1;
             }
-
-            // Start the next async receive immediately
-            memset(&overlapped, 0, sizeof(overlapped));
-            wsaBuf.buf = buffer;
-            wsaBuf.len = sizeof(buffer);
-            bytesReceived = 0;
-            flags = 0;
-            len = sizeof(cliaddr);
             
-            result = WSARecvFrom(sockfd, &wsaBuf, 1, &bytesReceived, &flags, 
-                                reinterpret_cast<sockaddr*>(&cliaddr), &len, &overlapped, NULL);
-            
-            if (result == SOCKET_ERROR && WSAGetLastError() != WSA_IO_PENDING) {
+            packets_processed++;
+        } else if (n == SOCKET_ERROR) {
+            int error = WSAGetLastError();
+            // Check if it's a timeout (expected) vs a real error
+            if (error == WSAETIMEDOUT || error == WSAEWOULDBLOCK) {
+                // Timeout is expected - just continue and check udpListenerRunning
+                continue;
+            } else if (udpListenerRunning) {
+                // Only print error if we're not shutting down
                 char errMsg[256];
-                sprintf(errMsg, "WSARecvFrom failed: %d", WSAGetLastError());
+                sprintf(errMsg, "recvfrom error: %d", error);
                 pwarASIOLog::Send(errMsg);
-                break;
-            }
-        } else if (!success && lpOverlapped) {
-            // Operation failed
-            DWORD error = GetLastError();
-            if (error != WAIT_TIMEOUT) {
-                char errMsg[256];
-                sprintf(errMsg, "IOCP operation failed: %d", error);
-                pwarASIOLog::Send(errMsg);
-                break;
             }
         }
-        // If timeout occurred, just continue the loop - this keeps the thread responsive
     }
 
     closesocket(sockfd);
-    CloseHandle(iocp);
     WSACleanup();
-    
-    if (mmcssHandle) {
-        AvRevertMmThreadCharacteristics(mmcssHandle);
-    }
+    pwarASIOLog::Send("UDP listener stopped");
 }
 
 void pwarASIO::startUdpListener() {
