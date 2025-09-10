@@ -35,6 +35,10 @@ static struct {
     latency_stat_t linux_rcv_delta_stat_current;
     latency_stat_t ring_buffer_fill_level_stat_current;
 
+    int64_t clock_offset_sum;
+    uint32_t clock_offset_count;
+    int64_t current_clock_offset;
+
     uint64_t last_print_time;
 
 } internal = {0};
@@ -63,8 +67,40 @@ void latency_manager_report_ring_buffer_fill_level(uint32_t fill_level) {
     process_latency_stat(&internal.ring_buffer_fill_level_stat, fill_level);
 }
 
+void calculate_windows_clock_offset(pwar_packet_t *packet) {
+   uint64_t estimated_rtt = internal.rtt_stat_current.avg;
+    
+    // Method 1: Linux->Windows direction
+    // t2 should occur at approximately t1 + one_way_delay
+    int64_t offset1 = ((int64_t)packet->t1_linux_send + (int64_t)(estimated_rtt / 2)) - (int64_t)packet->t2_windows_recv;
+    
+    // Method 2: Windows->Linux direction  
+    // t3 should occur at approximately t4 - one_way_delay
+    int64_t offset2 = ((int64_t)packet->t4_linux_recv - (int64_t)(estimated_rtt / 2)) - (int64_t)packet->t3_windows_send;
+    
+    // Average the two estimates for better accuracy
+    int64_t combined_offset = (offset1 + offset2) / 2;
+    
+    internal.clock_offset_sum += combined_offset;
+    internal.clock_offset_count++;
+}
+
+uint64_t convert_windows_to_linux_time(uint64_t windows_time) {
+    return windows_time + internal.current_clock_offset;
+}
+
+void latency_manager_check_for_abnormalities(uint64_t rtt, pwar_packet_t *packet) {
+    float rtt_ms = rtt / 1000000.0f;
+    if (rtt_ms > internal.expected_interval_ms) {
+        float linux_to_windows = (packet->t2_windows_recv - packet->t1_linux_send) / 1000000.0f;
+        float windows_to_linux = (packet->t4_linux_recv - packet->t3_windows_send) / 1000000.0f;
+        printf("\033[33m[PWAR][Warning]: High RTT detected: %.2fms (Linux->Windows: %.2fms, Windows->Linux: %.2fms)\033[0m\n", rtt_ms, linux_to_windows, windows_to_linux);
+    }
+}
+
 void latency_manager_process_packet(pwar_packet_t *packet) {
     packet->t4_linux_recv = latency_manager_timestamp_now();
+    calculate_windows_clock_offset(packet);
 
     uint64_t rtt = packet->t4_linux_recv - packet->t1_linux_send;
     uint64_t audio_proc = packet->t3_windows_send - packet->t2_windows_recv;
@@ -79,6 +115,11 @@ void latency_manager_process_packet(pwar_packet_t *packet) {
 
     internal.last_windows_recv = packet->t2_windows_recv;
     internal.last_linux_recv = packet->t4_linux_recv;
+
+    // Convert the clocks
+    packet->t2_windows_recv = convert_windows_to_linux_time(packet->t2_windows_recv);
+    packet->t3_windows_send = convert_windows_to_linux_time(packet->t3_windows_send);
+    latency_manager_check_for_abnormalities(rtt, packet);
 
     // Print stats every 2 seconds
     uint64_t current_time = latency_manager_timestamp_now();
@@ -117,7 +158,12 @@ void latency_manager_process_packet(pwar_packet_t *packet) {
         internal.windows_rcv_delta_stat = (latency_stat_t){0};
         internal.linux_rcv_delta_stat = (latency_stat_t){0};
         internal.ring_buffer_fill_level_stat = (latency_stat_t){0};
-        
+
+        // Update current clock offset estimate
+        internal.current_clock_offset = internal.clock_offset_sum / (int64_t)internal.clock_offset_count;
+        internal.clock_offset_sum = 0;
+        internal.clock_offset_count = 0;
+
         internal.last_print_time = current_time;
     }
 }
