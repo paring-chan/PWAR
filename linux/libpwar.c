@@ -61,7 +61,7 @@ static void setup_recv_socket(struct pwar_core_data *data, int port);
 static void *receiver_thread(void *userdata);
 static void audio_process_callback(float *in, float *out_left, float *out_right, 
                                  uint32_t n_samples, void *userdata);
-static void process_ping_pong(struct pwar_core_data *data, float *in, uint32_t n_samples, 
+static void process_audio(struct pwar_core_data *data, float *in, uint32_t n_samples, 
                             float *left_out, float *right_out);
 
 static void setup_socket(struct pwar_core_data *data, const char *ip, int port) {
@@ -135,10 +135,7 @@ static void *receiver_thread(void *userdata) {
                 }
             }
             
-            if (!pwar_ring_buffer_push(output_buffers, packet->n_samples, NUM_CHANNELS)) {
-                // Ring buffer full - this is an overrun
-                printf("\033[0;31m--- OVERRUN -- Ring buffer full, dropping samples\033[0m\n");
-            }
+            pwar_ring_buffer_push(output_buffers, packet->n_samples, NUM_CHANNELS);
         } else if (n < 0) {
             // Check if it's a timeout (expected) vs a real error
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
@@ -164,10 +161,10 @@ static void audio_process_callback(float *in, float *out_left, float *out_right,
         return;
     }
 
-    process_ping_pong(data, in, n_samples, out_left, out_right);
+    process_audio(data, in, n_samples, out_left, out_right);
 }
 
-static void process_ping_pong(struct pwar_core_data *data, float *in, uint32_t n_samples, 
+static void process_audio(struct pwar_core_data *data, float *in, uint32_t n_samples, 
                             float *left_out, float *right_out) {
     // Send input to Windows
     pwar_packet_t packet;
@@ -188,9 +185,7 @@ static void process_ping_pong(struct pwar_core_data *data, float *in, uint32_t n
     float rcv_buffers[NUM_CHANNELS * n_samples];
     memset(rcv_buffers, 0, sizeof(rcv_buffers));
     
-    if (!pwar_ring_buffer_pop(rcv_buffers, n_samples, NUM_CHANNELS)) {
-        printf("\033[0;31m--- UNDERRUN -- No samples available in ring buffer, outputting silence\033[0m\n");
-    }
+    pwar_ring_buffer_pop(rcv_buffers, n_samples, NUM_CHANNELS);
     
     // Copy to output channels
     if (left_out) memcpy(left_out, rcv_buffers, n_samples * sizeof(float));
