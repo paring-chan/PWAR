@@ -4,8 +4,6 @@ cmake_minimum_required(VERSION 3.16)
 # Create the simulator executable
 add_executable(pwar_client_simulator
     client_simulator.cpp
-    ${CMAKE_SOURCE_DIR}/protocol/pwar_router.c
-    ${CMAKE_SOURCE_DIR}/protocol/pwar_rcv_buffer.c  
     ${CMAKE_SOURCE_DIR}/protocol/latency_manager.c
 )
 
