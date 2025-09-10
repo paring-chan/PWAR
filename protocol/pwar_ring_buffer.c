@@ -6,15 +6,16 @@
 
 
 static struct {
-    float *buffer;          // Audio buffer
-    uint32_t depth;         // Buffer depth in samples
-    uint32_t channels;      // Number of audio channels
-    uint32_t write_index;   // Current write position
-    uint32_t read_index;    // Current read position
-    uint32_t available;     // Number of samples available to read
-    uint32_t overruns;      // Count of overrun events
-    uint32_t underruns;     // Count of underrun events
-    pthread_mutex_t mutex;  // Thread safety
+    float *buffer;              // Audio buffer
+    uint32_t depth;             // Buffer depth in samples
+    uint32_t channels;          // Number of audio channels
+    uint32_t expected_buffer_size; // Expected buffer size for prefill
+    uint32_t write_index;       // Current write position
+    uint32_t read_index;        // Current read position
+    uint32_t available;         // Number of samples available to read
+    uint32_t overruns;          // Count of overrun events
+    uint32_t underruns;         // Count of underrun events
+    pthread_mutex_t mutex;      // Thread safety
 } ring_buffer = {0};
 
 
@@ -23,11 +24,14 @@ static void prefill_buffer() {
         return;
     }
     
-    // Reset indices and fill with zeros up to the full buffer depth
+    // Reset indices and fill with zeros up to depth - expected_buffer_size
+    // This leaves one expected_buffer_size worth of headroom for overruns
     ring_buffer.write_index = 0;
     ring_buffer.read_index = 0;
     
-    for (uint32_t i = 0; i < ring_buffer.depth; i++) {
+    // Prefill to depth - expected_buffer_size, leaving headroom
+    uint32_t prefill_samples = ring_buffer.depth - ring_buffer.expected_buffer_size;
+    for (uint32_t i = 0; i < prefill_samples; i++) {
         uint32_t write_pos = ring_buffer.write_index * ring_buffer.channels;
         for (uint32_t ch = 0; ch < ring_buffer.channels; ch++) {
             ring_buffer.buffer[write_pos + ch] = 0.0f;
@@ -35,27 +39,28 @@ static void prefill_buffer() {
         ring_buffer.write_index = (ring_buffer.write_index + 1) % ring_buffer.depth;
     }
 
-    ring_buffer.available = ring_buffer.depth; // Buffer is now full
+    ring_buffer.available = prefill_samples; // Buffer has prefill_samples available
 }
 
 
-void pwar_ring_buffer_init(uint32_t depth, uint32_t channels) {
+void pwar_ring_buffer_init(uint32_t depth, uint32_t channels, uint32_t expected_buffer_size) {
     // Free any existing buffer
     if (ring_buffer.buffer != NULL) {
         pwar_ring_buffer_free();
     }
 
-    // Initialize the ring buffer structure
-    ring_buffer.depth = depth;
+    // Initialize the ring buffer structure with increased depth to handle overruns
+    ring_buffer.depth = depth + expected_buffer_size;
     ring_buffer.channels = channels;
+    ring_buffer.expected_buffer_size = expected_buffer_size;
     ring_buffer.write_index = 0;
     ring_buffer.read_index = 0;
     ring_buffer.available = 0;
     ring_buffer.overruns = 0;
     ring_buffer.underruns = 0;
     
-    // Allocate buffer memory (depth * channels * sizeof(float))
-    ring_buffer.buffer = (float*)calloc(depth * channels, sizeof(float));
+    // Allocate buffer memory (total_depth * channels * sizeof(float))
+    ring_buffer.buffer = (float*)calloc(ring_buffer.depth * channels, sizeof(float));
     if (ring_buffer.buffer == NULL) {
         fprintf(stderr, "Error: Failed to allocate ring buffer memory\n");
         return;
@@ -70,7 +75,8 @@ void pwar_ring_buffer_init(uint32_t depth, uint32_t channels) {
     }
     
     prefill_buffer();
-    printf("Ring buffer initialized: %d samples, %d channels\n", depth, channels);
+    printf("Ring buffer initialized: %d samples + %d buffer (%d total), %d channels\n", 
+           depth, expected_buffer_size, ring_buffer.depth, channels);
 }
 
 void pwar_ring_buffer_free() {
@@ -83,6 +89,7 @@ void pwar_ring_buffer_free() {
     
     ring_buffer.depth = 0;
     ring_buffer.channels = 0;
+    ring_buffer.expected_buffer_size = 0;
     ring_buffer.write_index = 0;
     ring_buffer.read_index = 0;
     ring_buffer.available = 0;

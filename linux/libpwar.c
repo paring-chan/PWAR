@@ -215,8 +215,8 @@ static int init_core_data(struct pwar_core_data *data, const pwar_config_t *conf
     
     data->seq = 0;
     
-    // Initialize ring buffer with configured depth
-    pwar_ring_buffer_init(config->ring_buffer_depth, NUM_CHANNELS);
+    // Initialize ring buffer with configured depth and expected buffer size
+    pwar_ring_buffer_init(config->ring_buffer_depth, NUM_CHANNELS, config->buffer_size);
     
     // Create appropriate audio backend using unified factory
     if (!audio_backend_is_available(config->backend_type)) {

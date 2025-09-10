@@ -8,6 +8,9 @@ set(CMAKE_CXX_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# Enable testing
+enable_testing()
+
 # Platform-specific builds
 if(WIN32)
     # Windows-specific targets
@@ -18,3 +21,6 @@ else()
     # Linux-specific targets
     add_subdirectory(linux)
 endif()
+
+# Protocol tests (cross-platform)
+add_subdirectory(protocol/test)
