@@ -17,6 +17,8 @@ void latency_manager_process_packet(pwar_packet_t *packet);
 
 void latency_manager_report_ring_buffer_fill_level(uint32_t fill_level);
 
+void latency_manger_get_current_metrics(pwar_latency_metrics_t *metrics);
+
 #ifdef __cplusplus
 }
 #endif

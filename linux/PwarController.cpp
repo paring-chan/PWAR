@@ -10,7 +10,7 @@ PwarController::PwarController(QObject *parent)
       m_audioProcMinMs(0.0), m_audioProcMaxMs(0.0), m_audioProcAvgMs(0.0),
       m_jitterMinMs(0.0), m_jitterMaxMs(0.0), m_jitterAvgMs(0.0),
       m_rttMinMs(0.0), m_rttMaxMs(0.0), m_rttAvgMs(0.0),
-      m_xruns(0), m_currentWindowsBufferSize(0) {
+      m_ringBufferAvgMs(0.0), m_xruns(0), m_currentWindowsBufferSize(0) {
     
     // Initialize QSettings with organization and application name
     m_settings = new QSettings("PWAR", "PwarController", this);
@@ -418,6 +418,10 @@ double PwarController::rttAvgMs() const {
     return m_rttAvgMs;
 }
 
+double PwarController::ringBufferAvgMs() const {
+    return m_ringBufferAvgMs;
+}
+
 uint32_t PwarController::xruns() const {
     return m_xruns;
 }
@@ -436,34 +440,6 @@ void PwarController::updateLatencyMetrics() {
     
     bool changed = false;
     
-    // Update audio processing metrics
-    if (m_audioProcMinMs != metrics.audio_proc_min_ms) {
-        m_audioProcMinMs = metrics.audio_proc_min_ms;
-        changed = true;
-    }
-    if (m_audioProcMaxMs != metrics.audio_proc_max_ms) {
-        m_audioProcMaxMs = metrics.audio_proc_max_ms;
-        changed = true;
-    }
-    if (m_audioProcAvgMs != metrics.audio_proc_avg_ms) {
-        m_audioProcAvgMs = metrics.audio_proc_avg_ms;
-        changed = true;
-    }
-    
-    // Update jitter metrics
-    if (m_jitterMinMs != metrics.jitter_min_ms) {
-        m_jitterMinMs = metrics.jitter_min_ms;
-        changed = true;
-    }
-    if (m_jitterMaxMs != metrics.jitter_max_ms) {
-        m_jitterMaxMs = metrics.jitter_max_ms;
-        changed = true;
-    }
-    if (m_jitterAvgMs != metrics.jitter_avg_ms) {
-        m_jitterAvgMs = metrics.jitter_avg_ms;
-        changed = true;
-    }
-    
     // Update RTT metrics
     if (m_rttMinMs != metrics.rtt_min_ms) {
         m_rttMinMs = metrics.rtt_min_ms;
@@ -475,6 +451,12 @@ void PwarController::updateLatencyMetrics() {
     }
     if (m_rttAvgMs != metrics.rtt_avg_ms) {
         m_rttAvgMs = metrics.rtt_avg_ms;
+        changed = true;
+    }
+    
+    // Update ring buffer average
+    if (m_ringBufferAvgMs != metrics.ring_buffer_avg_ms) {
+        m_ringBufferAvgMs = metrics.ring_buffer_avg_ms;
         changed = true;
     }
     

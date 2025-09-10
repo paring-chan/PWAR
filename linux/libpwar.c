@@ -407,18 +407,10 @@ void pwar_get_latency_metrics(pwar_latency_metrics_t *metrics) {
     if (!metrics) return;
     
     if (g_pwar_initialized && g_pwar_running) {
+        latency_manger_get_current_metrics(metrics);
     } else {
         // Return zeros if not running
-        metrics->audio_proc_min_ms = 0.0;
-        metrics->audio_proc_max_ms = 0.0;
-        metrics->audio_proc_avg_ms = 0.0;
-        metrics->jitter_min_ms = 0.0;
-        metrics->jitter_max_ms = 0.0;
-        metrics->jitter_avg_ms = 0.0;
-        metrics->rtt_min_ms = 0.0;
-        metrics->rtt_max_ms = 0.0;
-        metrics->rtt_avg_ms = 0.0;
-        metrics->xruns = 0;
+        memset(metrics, 0, sizeof(pwar_latency_metrics_t));
     }
 }
 

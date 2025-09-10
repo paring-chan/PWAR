@@ -25,11 +25,15 @@ static struct {
 
     latency_stat_t rtt_stat;
     latency_stat_t audio_proc_stat;
-
     latency_stat_t windows_rcv_delta_stat;
     latency_stat_t linux_rcv_delta_stat;
-
     latency_stat_t ring_buffer_fill_level_stat;
+
+    latency_stat_t rtt_stat_current;
+    latency_stat_t audio_proc_stat_current;
+    latency_stat_t windows_rcv_delta_stat_current;
+    latency_stat_t linux_rcv_delta_stat_current;
+    latency_stat_t ring_buffer_fill_level_stat_current;
 
     uint64_t last_print_time;
 
@@ -100,6 +104,12 @@ void latency_manager_process_packet(pwar_packet_t *packet) {
                internal.linux_rcv_delta_stat.min / 1000000.0,
                internal.linux_rcv_delta_stat.avg / 1000000.0,
                internal.linux_rcv_delta_stat.max / 1000000.0);
+
+        internal.ring_buffer_fill_level_stat_current = internal.ring_buffer_fill_level_stat;
+        internal.rtt_stat_current = internal.rtt_stat;
+        internal.audio_proc_stat_current = internal.audio_proc_stat;
+        internal.windows_rcv_delta_stat_current = internal.windows_rcv_delta_stat;
+        internal.linux_rcv_delta_stat_current = internal.linux_rcv_delta_stat;
         
         // Reset stats for next period
         internal.rtt_stat = (latency_stat_t){0};
@@ -110,6 +120,25 @@ void latency_manager_process_packet(pwar_packet_t *packet) {
         
         internal.last_print_time = current_time;
     }
+}
+
+void latency_manger_get_current_metrics(pwar_latency_metrics_t *metrics) {
+    metrics->rtt_min_ms = internal.rtt_stat_current.min / 1000000.0;
+    metrics->rtt_max_ms = internal.rtt_stat_current.max / 1000000.0;
+    metrics->rtt_avg_ms = internal.rtt_stat_current.avg / 1000000.0;
+    metrics->audio_proc_min_ms = internal.audio_proc_stat_current.min / 1000000.0;
+    metrics->audio_proc_max_ms = internal.audio_proc_stat_current.max / 1000000.0;
+    metrics->audio_proc_avg_ms = internal.audio_proc_stat_current.avg / 1000000.0;
+    metrics->windows_jitter_min_ms = internal.windows_rcv_delta_stat_current.min / 1000000.0;
+    metrics->windows_jitter_max_ms = internal.windows_rcv_delta_stat_current.max / 1000000.0;
+    metrics->windows_jitter_avg_ms = internal.windows_rcv_delta_stat_current.avg / 1000000.0;   
+    metrics->linux_jitter_min_ms = internal.linux_rcv_delta_stat_current.min / 1000000.0;
+    metrics->linux_jitter_max_ms = internal.linux_rcv_delta_stat_current.max / 1000000.0;
+    metrics->linux_jitter_avg_ms = internal.linux_rcv_delta_stat_current.avg / 1000000.0;   
+    metrics->ring_buffer_min_ms = (internal.ring_buffer_fill_level_stat_current.min / (float)internal.sample_rate) * 1000.0f;
+    metrics->ring_buffer_max_ms = (internal.ring_buffer_fill_level_stat_current.max / (float)internal.sample_rate) * 1000.0f;
+    metrics->ring_buffer_avg_ms = (internal.ring_buffer_fill_level_stat_current.avg / (float)internal.sample_rate) * 1000.0f;
+    metrics->xruns = 0; // XRUNs tracking not implemented yet
 }
 
 uint64_t latency_manager_timestamp_now() {

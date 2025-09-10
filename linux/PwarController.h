@@ -29,6 +29,7 @@ class PwarController : public QObject {
     Q_PROPERTY(double rttMinMs READ rttMinMs NOTIFY latencyMetricsChanged)
     Q_PROPERTY(double rttMaxMs READ rttMaxMs NOTIFY latencyMetricsChanged)
     Q_PROPERTY(double rttAvgMs READ rttAvgMs NOTIFY latencyMetricsChanged)
+    Q_PROPERTY(double ringBufferAvgMs READ ringBufferAvgMs NOTIFY latencyMetricsChanged)
     Q_PROPERTY(uint32_t xruns READ xruns NOTIFY latencyMetricsChanged)
     
     // Current Windows buffer size property
@@ -80,6 +81,7 @@ public:
     double rttMinMs() const;
     double rttMaxMs() const;
     double rttAvgMs() const;
+    double ringBufferAvgMs() const;
     uint32_t xruns() const;
     
     // Current Windows buffer size getter
@@ -128,6 +130,7 @@ private:
     double m_rttMinMs;
     double m_rttMaxMs;
     double m_rttAvgMs;
+    double m_ringBufferAvgMs;
     uint32_t m_xruns;
     QTimer *m_latencyUpdateTimer;
     
