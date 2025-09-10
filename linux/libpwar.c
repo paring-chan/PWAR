@@ -108,7 +108,7 @@ static void *receiver_thread(void *userdata) {
     }
 
     struct pwar_core_data *data = (struct pwar_core_data *)userdata;
-    char recv_buffer[sizeof(pwar_packet_t) > sizeof(pwar_latency_info_t) ? sizeof(pwar_packet_t) : sizeof(pwar_latency_info_t)];
+    char recv_buffer[sizeof(pwar_packet_t)];
     float output_buffers[NUM_CHANNELS * MAX_BUFFER_SIZE] = {0};
 
     // Set socket timeout to allow periodic checking of should_stop
@@ -124,8 +124,8 @@ static void *receiver_thread(void *userdata) {
         
         if (n == (ssize_t)sizeof(pwar_packet_t)) {
             pwar_packet_t *packet = (pwar_packet_t *)recv_buffer;
-            latency_manager_process_packet_server(packet);
-            data->current_windows_buffer_size = packet->n_samples * packet->num_packets;
+            latency_manager_process_packet(packet);
+            data->current_windows_buffer_size = packet->n_samples;
             
             // Direct push to ring buffer - assume single packet for now
             // Convert from packet format to channel-major format
@@ -139,9 +139,6 @@ static void *receiver_thread(void *userdata) {
                 // Ring buffer full - this is an overrun
                 printf("\033[0;31m--- OVERRUN -- Ring buffer full, dropping samples\033[0m\n");
             }
-        } else if (n == (ssize_t)sizeof(pwar_latency_info_t)) {
-            pwar_latency_info_t *latency_info = (pwar_latency_info_t *)recv_buffer;
-            latency_manager_handle_latency_info(latency_info);
         } else if (n < 0) {
             // Check if it's a timeout (expected) vs a real error
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
@@ -174,17 +171,13 @@ static void process_ping_pong(struct pwar_core_data *data, float *in, uint32_t n
                             float *left_out, float *right_out) {
     // Send input to Windows
     pwar_packet_t packet;
-    packet.seq = data->seq++;
     packet.n_samples = n_samples;
-    packet.packet_index = 0;
-    packet.num_packets = 1;
     
     // Copy input samples to both channels
     memcpy(packet.samples[0], in, n_samples * sizeof(float));
     memcpy(packet.samples[1], in, n_samples * sizeof(float));
     
-    packet.timestamp = latency_manager_timestamp_now();
-    packet.seq_timestamp = packet.timestamp;
+    packet.t1_linux_send = latency_manager_timestamp_now();
     
     if (sendto(data->sockfd, &packet, sizeof(packet), 0, 
                (struct sockaddr *)&data->servaddr, sizeof(data->servaddr)) < 0) {
@@ -197,7 +190,6 @@ static void process_ping_pong(struct pwar_core_data *data, float *in, uint32_t n
     
     if (!pwar_ring_buffer_pop(rcv_buffers, n_samples, NUM_CHANNELS)) {
         printf("\033[0;31m--- UNDERRUN -- No samples available in ring buffer, outputting silence\033[0m\n");
-        latency_manager_report_xrun();
     }
     
     // Copy to output channels
@@ -217,6 +209,9 @@ static int init_core_data(struct pwar_core_data *data, const pwar_config_t *conf
     
     // Initialize ring buffer with configured depth and expected buffer size
     pwar_ring_buffer_init(config->ring_buffer_depth, NUM_CHANNELS, config->buffer_size);
+    
+    // Initialize latency manager
+    latency_manager_init(config->audio_config.sample_rate, config->buffer_size);
     
     // Create appropriate audio backend using unified factory
     if (!audio_backend_is_available(config->backend_type)) {
@@ -416,7 +411,6 @@ void pwar_get_latency_metrics(pwar_latency_metrics_t *metrics) {
     if (!metrics) return;
     
     if (g_pwar_initialized && g_pwar_running) {
-        latency_manager_get_current_metrics(metrics);
     } else {
         // Return zeros if not running
         metrics->audio_proc_min_ms = 0.0;

@@ -41,7 +41,6 @@ include_directories(${CMAKE_SOURCE_DIR}/protocol)
 
 # Protocol sources (backend agnostic)
 set(PROTOCOL_SOURCES
-    ${CMAKE_SOURCE_DIR}/protocol/pwar_router.c
     ${CMAKE_SOURCE_DIR}/protocol/pwar_ring_buffer.c
     ${CMAKE_SOURCE_DIR}/protocol/latency_manager.c
 )
@@ -147,22 +146,6 @@ else()
     message(STATUS "Qt5 not found - skipping GUI application")
 endif()
 
-# Torture test executable (agnostic)
-add_executable(pwar_torture
-    torture.c
-)
-
-target_link_libraries(pwar_torture pwar)
-
-# Set compile definitions for torture test based on available backends  
-if(HAVE_ALSA)
-    target_compile_definitions(pwar_torture PRIVATE HAVE_ALSA=1)
-endif()
-
-if(HAVE_PIPEWIRE)
-    target_compile_definitions(pwar_torture PRIVATE HAVE_PIPEWIRE=1)
-endif()
-
 # Client simulator executable (agnostic)
 add_executable(client_simulator
     client_simulator.c
@@ -223,6 +206,5 @@ if(Qt5_FOUND)
 else()
     message(STATUS "  pwar_gui: NO (Qt5 not found)")
 endif()
-message(STATUS "  pwar_torture: YES (agnostic)")
 message(STATUS "  client_simulator: YES (agnostic)")
 message(STATUS "================================")

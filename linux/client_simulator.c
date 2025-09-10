@@ -22,7 +22,6 @@
 #include <time.h>
 #include <signal.h>
 #include "../protocol/pwar_packet.h"
-#include "../protocol/pwar_router.h"
 #include "../protocol/latency_manager.h"
 
 // Default configuration (matching your existing setup)
@@ -45,11 +44,6 @@ typedef struct {
 // Global state
 static int recv_sockfd;
 static int send_sockfd;
-static pthread_mutex_t packet_mutex = PTHREAD_MUTEX_INITIALIZER;
-static pthread_cond_t packet_cond = PTHREAD_COND_INITIALIZER;
-static pwar_packet_t latest_packet;
-static int packet_available = 0;
-static pwar_router_t router;
 static struct sockaddr_in servaddr;
 static volatile int keep_running = 1;
 static client_config_t config;
@@ -192,15 +186,8 @@ static void *receiver_thread(void *userdata) {
     }
     
     pwar_packet_t packet;
-    pwar_packet_t output_packets[32];
-    uint32_t packets_to_send = 0;
+    pwar_packet_t response_packet;
     uint64_t packets_processed = 0;
-    
-    float *output_buffers = malloc(config.channels * config.buffer_size * sizeof(float));
-    if (!output_buffers) {
-        fprintf(stderr, "Failed to allocate output buffers\n");
-        return NULL;
-    }
     
     printf("[Client Simulator] Receiver thread started\n");
     
@@ -208,82 +195,27 @@ static void *receiver_thread(void *userdata) {
         ssize_t n = recvfrom(recv_sockfd, &packet, sizeof(packet), 0, NULL, NULL);
         
         if (n == (ssize_t)sizeof(packet)) {
-            pthread_mutex_lock(&packet_mutex);
-            latest_packet = packet;
-            packet_available = 1;
+            // Set Windows receive timestamp
+            packet.t2_windows_recv = latency_manager_timestamp_now();
             
-            // Clear output buffer
-            memset(output_buffers, 0, config.channels * config.buffer_size * sizeof(float));
+            // Copy input to output 1:1 (no audio processing)
+            response_packet = packet; // Copy the whole structure including samples
             
-            uint32_t chunk_size = packet.n_samples;
-            packet.num_packets = config.buffer_size / chunk_size;
+            // Set Windows send timestamp
+            response_packet.t3_windows_send = latency_manager_timestamp_now();
             
-            // Process packet with latency measurement
-            latency_manager_process_packet_client(&packet);
-            int samples_ready = pwar_router_process_streaming_packet(&router, &packet, 
-                                                                   output_buffers, 
-                                                                   config.buffer_size, 
-                                                                   config.channels);
-            
-            if (samples_ready > 0) {
-                uint32_t seq = packet.seq;
-                
-                latency_manager_start_audio_cbk_begin();
-                
-                // Simple audio processing: copy channel 0 to all other channels
-                // This simulates what a real audio application might do
-                for (uint32_t ch = 1; ch < config.channels; ch++) {
-                    for (uint32_t i = 0; i < samples_ready; i++) {
-                        output_buffers[ch * config.buffer_size + i] = 
-                            output_buffers[i]; // Copy from channel 0
-                    }
-                }
-                
-                latency_manager_start_audio_cbk_end();
-                
-                // Send processed audio back to server
-                pwar_router_send_buffer(&router, chunk_size, output_buffers, 
-                                      samples_ready, config.channels, 
-                                      output_packets, 32, &packets_to_send);
-                
-                uint64_t timestamp = latency_manager_timestamp_now();
-                
-                // Set sequence and timestamp for all packets
-                for (uint32_t i = 0; i < packets_to_send; i++) {
-                    output_packets[i].seq = seq;
-                    output_packets[i].timestamp = timestamp;
-                }
-                
-                // Send all packets
-                for (uint32_t i = 0; i < packets_to_send; i++) {
-                    ssize_t sent = sendto(send_sockfd, &output_packets[i], 
-                                        sizeof(output_packets[i]), 0, 
-                                        (struct sockaddr *)&servaddr, 
-                                        sizeof(servaddr));
-                    if (sent < 0) {
-                        perror("sendto failed");
-                    }
-                }
-                
-                packets_processed++;
-                if (config.verbose && packets_processed % 1000 == 0) {
-                    printf("[Client Simulator] Processed %llu packets\n", 
-                           (unsigned long long)packets_processed);
-                }
+            // Send response packet back to server
+            ssize_t sent = sendto(send_sockfd, &response_packet, sizeof(response_packet), 0, 
+                                (struct sockaddr *)&servaddr, sizeof(servaddr));
+            if (sent < 0) {
+                perror("sendto failed");
             }
             
-            // Handle latency info
-            pwar_latency_info_t latency_info;
-            if (latency_manager_time_for_sending_latency_info(&latency_info)) {
-                ssize_t sent = sendto(send_sockfd, &latency_info, sizeof(latency_info), 0,
-                                    (struct sockaddr *)&servaddr, sizeof(servaddr));
-                if (sent < 0) {
-                    perror("latency info sendto failed");
-                }
+            packets_processed++;
+            if (config.verbose && packets_processed % 1000 == 0) {
+                printf("[Client Simulator] Processed %llu packets\n", 
+                       (unsigned long long)packets_processed);
             }
-            
-            pthread_cond_signal(&packet_cond);
-            pthread_mutex_unlock(&packet_mutex);
         } else if (n < 0) {
             // Check if it's a timeout (expected) vs a real error
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
@@ -298,7 +230,6 @@ static void *receiver_thread(void *userdata) {
     }
     
     printf("[Client Simulator] Receiver thread stopped\n");
-    free(output_buffers);
     return NULL;
 }
 
@@ -330,8 +261,7 @@ int main(int argc, char *argv[]) {
     signal(SIGTERM, signal_handler);
     
     // Initialize PWAR components
-    latency_manager_init();
-    pwar_router_init(&router, config.channels);
+    latency_manager_init(48000, config.buffer_size); // Use default 48kHz sample rate
     
     // Set up networking
     setup_recv_socket(config.client_port);
