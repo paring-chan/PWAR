@@ -21,12 +21,15 @@ static struct {
     uint64_t last_linux_recv;
 
     float expected_interval_ms;
+    uint32_t sample_rate;
 
     latency_stat_t rtt_stat;
     latency_stat_t audio_proc_stat;
 
     latency_stat_t windows_rcv_delta_stat;
     latency_stat_t linux_rcv_delta_stat;
+
+    latency_stat_t ring_buffer_fill_level_stat;
 
     uint64_t last_print_time;
 
@@ -48,6 +51,12 @@ static void process_latency_stat(latency_stat_t *stat, uint64_t value) {
 
 void latency_manager_init(uint32_t sample_rate, uint32_t buffer_size) {
     internal.expected_interval_ms = (buffer_size / (float)sample_rate) * 1000.0f;
+    internal.sample_rate = sample_rate;
+}
+
+
+void latency_manager_report_ring_buffer_fill_level(uint32_t fill_level) {
+    process_latency_stat(&internal.ring_buffer_fill_level_stat, fill_level);
 }
 
 void latency_manager_process_packet(pwar_packet_t *packet) {
@@ -75,7 +84,10 @@ void latency_manager_process_packet(pwar_packet_t *packet) {
     
     uint64_t time_since_print = current_time - internal.last_print_time;
     if (time_since_print >= 2000000000ULL) { // 2 seconds in nanoseconds
-        printf("[PWAR]: RTT: min=%.2fms avg=%.2fms max=%.2fms | AudioProc: min=%.2fms avg=%.2fms max=%.2fms | WinJitter: min=%.2fms avg=%.2fms max=%.2fms | LinuxJitter: min=%.2fms avg=%.2fms max=%.2fms\n",
+        printf("[PWAR]: BufferDelay: min=%.2fms avg=%.2fms max=%.2fms | RTT: min=%.2fms avg=%.2fms max=%.2fms | AudioProc: min=%.2fms avg=%.2fms max=%.2fms | WinJitter: min=%.2fms avg=%.2fms max=%.2fms | LinuxJitter: min=%.2fms avg=%.2fms max=%.2fms\n",
+               (internal.ring_buffer_fill_level_stat.min / (float)internal.sample_rate) * 1000.0f,
+               (internal.ring_buffer_fill_level_stat.avg / (float)internal.sample_rate) * 1000.0f,
+               (internal.ring_buffer_fill_level_stat.max / (float)internal.sample_rate) * 1000.0f,
                internal.rtt_stat.min / 1000000.0,
                internal.rtt_stat.avg / 1000000.0,
                internal.rtt_stat.max / 1000000.0,
@@ -94,6 +106,7 @@ void latency_manager_process_packet(pwar_packet_t *packet) {
         internal.audio_proc_stat = (latency_stat_t){0};
         internal.windows_rcv_delta_stat = (latency_stat_t){0};
         internal.linux_rcv_delta_stat = (latency_stat_t){0};
+        internal.ring_buffer_fill_level_stat = (latency_stat_t){0};
         
         internal.last_print_time = current_time;
     }

@@ -136,6 +136,7 @@ static void *receiver_thread(void *userdata) {
             }
             
             pwar_ring_buffer_push(output_buffers, packet->n_samples, NUM_CHANNELS);
+            latency_manager_report_ring_buffer_fill_level(pwar_ring_buffer_get_available());
         } else if (n < 0) {
             // Check if it's a timeout (expected) vs a real error
             if (errno == EAGAIN || errno == EWOULDBLOCK) {

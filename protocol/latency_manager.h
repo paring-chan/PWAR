@@ -15,6 +15,8 @@ uint64_t latency_manager_timestamp_now();
 
 void latency_manager_process_packet(pwar_packet_t *packet);
 
+void latency_manager_report_ring_buffer_fill_level(uint32_t fill_level);
+
 #ifdef __cplusplus
 }
 #endif
