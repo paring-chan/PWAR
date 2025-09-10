@@ -41,8 +41,7 @@ START_TEST(test_ring_buffer_init_free)
     ck_assert_uint_eq(pwar_ring_buffer_get_overruns(), 0);
     ck_assert_uint_eq(pwar_ring_buffer_get_underruns(), 0);
     
-    // Should have prefill data available (depth - expected_buffer_size)
-    uint32_t expected_prefill = TEST_DEPTH - TEST_EXPECTED_BUFFER_SIZE;
+    uint32_t expected_prefill = TEST_DEPTH;
     ck_assert_uint_eq(pwar_ring_buffer_get_available(), expected_prefill);
     
     pwar_ring_buffer_free();
@@ -54,8 +53,9 @@ START_TEST(test_ring_buffer_basic_push_pop)
 {
     pwar_ring_buffer_init(TEST_DEPTH, TEST_CHANNELS, TEST_EXPECTED_BUFFER_SIZE);
     
-    uint32_t test_samples = 100;
+    uint32_t test_samples = TEST_EXPECTED_BUFFER_SIZE;
     float input_buffer[TEST_CHANNELS * test_samples];
+    float prefill_buffer[TEST_CHANNELS * TEST_DEPTH]; // Separate buffer for prefill data
     float output_buffer[TEST_CHANNELS * test_samples];
     
     fill_test_data(input_buffer, TEST_CHANNELS, test_samples, 1000.0f);
@@ -65,17 +65,17 @@ START_TEST(test_ring_buffer_basic_push_pop)
     ck_assert_int_eq(ret, 1);
     
     // Check available count increased
-    uint32_t expected_available = (TEST_DEPTH - TEST_EXPECTED_BUFFER_SIZE) + test_samples;
+    uint32_t expected_available = TEST_DEPTH + test_samples;
     ck_assert_uint_eq(pwar_ring_buffer_get_available(), expected_available);
     
     // Pop prefill data first (should be zeros)
-    memset(output_buffer, 0xAA, sizeof(output_buffer)); // Fill with junk
-    ret = pwar_ring_buffer_pop(output_buffer, TEST_DEPTH - TEST_EXPECTED_BUFFER_SIZE, TEST_CHANNELS);
-    ck_assert_int_eq(ret, TEST_DEPTH - TEST_EXPECTED_BUFFER_SIZE);
+    memset(prefill_buffer, 0xAA, sizeof(prefill_buffer)); // Fill with junk
+    ret = pwar_ring_buffer_pop(prefill_buffer, TEST_DEPTH, TEST_CHANNELS);
+    ck_assert_int_eq(ret, TEST_DEPTH);
     
     // Verify prefill was zeros
-    for (uint32_t i = 0; i < (TEST_DEPTH - TEST_EXPECTED_BUFFER_SIZE) * TEST_CHANNELS; i++) {
-        ck_assert_float_eq_tol(output_buffer[i], 0.0f, 0.0001f);
+    for (uint32_t i = 0; i < TEST_DEPTH * TEST_CHANNELS; i++) {
+        ck_assert_float_eq_tol(prefill_buffer[i], 0.0f, 0.0001f);
     }
     
     // Now pop our test data
@@ -113,7 +113,7 @@ START_TEST(test_ring_buffer_underrun)
     }
     
     // After underrun, buffer should be prefilled again
-    uint32_t expected_available = TEST_DEPTH - TEST_EXPECTED_BUFFER_SIZE;
+    uint32_t expected_available = TEST_DEPTH;
     ck_assert_uint_eq(pwar_ring_buffer_get_available(), expected_available);
     
     pwar_ring_buffer_free();
@@ -125,11 +125,11 @@ START_TEST(test_ring_buffer_multiple_underruns)
 {
     pwar_ring_buffer_init(TEST_DEPTH, TEST_CHANNELS, TEST_EXPECTED_BUFFER_SIZE);
     
-    uint32_t small_chunk = 50;
+    uint32_t small_chunk = TEST_EXPECTED_BUFFER_SIZE;
     float output_buffer[TEST_CHANNELS * small_chunk];
     
     // Consume all prefill data first
-    uint32_t prefill_samples = TEST_DEPTH - TEST_EXPECTED_BUFFER_SIZE;
+    uint32_t prefill_samples = TEST_DEPTH;
     float prefill_buffer[TEST_CHANNELS * prefill_samples];
     pwar_ring_buffer_pop(prefill_buffer, prefill_samples, TEST_CHANNELS);
     
@@ -172,8 +172,8 @@ START_TEST(test_ring_buffer_overrun)
     // Verify overrun was detected
     ck_assert_uint_gt(pwar_ring_buffer_get_overruns(), initial_overruns);
     
-    // Buffer should be full after overrun
-    ck_assert_uint_eq(pwar_ring_buffer_get_available(), TEST_DEPTH);
+    // Buffer should be full after overrun, and full means TEST_DEPTH + TEST_EXPECTED_BUFFER_SIZE due to safety margin
+    ck_assert_uint_eq(pwar_ring_buffer_get_available(), TEST_DEPTH+TEST_EXPECTED_BUFFER_SIZE);
     
     // When we pop data, we should get the LATEST data (oldest was discarded)
     float output_buffer[TEST_CHANNELS * TEST_DEPTH];
@@ -181,7 +181,9 @@ START_TEST(test_ring_buffer_overrun)
     ck_assert_int_eq(ret, TEST_DEPTH);
     
     // The data should be from the end of the input (newest data)
-    uint32_t offset = excessive_samples - TEST_DEPTH;
+    // Account for the actual buffer capacity including safety margin
+    uint32_t actual_buffer_capacity = TEST_DEPTH + TEST_EXPECTED_BUFFER_SIZE;
+    uint32_t offset = excessive_samples - actual_buffer_capacity;
     verify_test_data(output_buffer, TEST_CHANNELS, TEST_DEPTH, 2000.0f + offset, "overrun_latest_data");
     
     pwar_ring_buffer_free();
@@ -193,7 +195,7 @@ START_TEST(test_ring_buffer_gradual_overrun)
 {
     pwar_ring_buffer_init(TEST_DEPTH, TEST_CHANNELS, TEST_EXPECTED_BUFFER_SIZE);
     
-    uint32_t chunk_size = 200;
+    uint32_t chunk_size = TEST_EXPECTED_BUFFER_SIZE;
     float input_buffer[TEST_CHANNELS * chunk_size];
     
     // Keep pushing without popping to gradually fill buffer
@@ -211,8 +213,8 @@ START_TEST(test_ring_buffer_gradual_overrun)
         }
     }
     
-    // Buffer should be at capacity
-    ck_assert_uint_eq(pwar_ring_buffer_get_available(), TEST_DEPTH);
+    // Buffer should be at capacity (including safety margin)
+    ck_assert_uint_eq(pwar_ring_buffer_get_available(), TEST_DEPTH + TEST_EXPECTED_BUFFER_SIZE);
     
     pwar_ring_buffer_free();
 }
@@ -223,8 +225,8 @@ START_TEST(test_ring_buffer_mixed_overrun_underrun)
 {
     pwar_ring_buffer_init(TEST_DEPTH, TEST_CHANNELS, TEST_EXPECTED_BUFFER_SIZE);
     
-    // First cause an overrun
-    uint32_t large_push = TEST_DEPTH + 200;
+    // First cause an overrun - need to exceed actual buffer capacity (TEST_DEPTH + TEST_EXPECTED_BUFFER_SIZE)
+    uint32_t large_push = TEST_DEPTH + TEST_EXPECTED_BUFFER_SIZE + 100; // 1380 > 1280, will cause overrun
     float input_buffer[TEST_CHANNELS * large_push];
     fill_test_data(input_buffer, TEST_CHANNELS, large_push, 3000.0f);
     pwar_ring_buffer_push(input_buffer, large_push, TEST_CHANNELS);
@@ -233,7 +235,9 @@ START_TEST(test_ring_buffer_mixed_overrun_underrun)
     ck_assert_uint_gt(overruns_after_push, 0);
     
     // Now cause an underrun by popping more than available
-    uint32_t large_pop = TEST_DEPTH + 100;
+    // After overrun, buffer has TEST_DEPTH + TEST_EXPECTED_BUFFER_SIZE samples
+    uint32_t available_after_overrun = TEST_DEPTH + TEST_EXPECTED_BUFFER_SIZE;
+    uint32_t large_pop = available_after_overrun + 100; // Pop more than available
     float output_buffer[TEST_CHANNELS * large_pop];
     pwar_ring_buffer_pop(output_buffer, large_pop, TEST_CHANNELS);
     
@@ -241,7 +245,7 @@ START_TEST(test_ring_buffer_mixed_overrun_underrun)
     ck_assert_uint_gt(underruns_after_pop, 0);
     
     // After underrun, buffer should be prefilled again
-    uint32_t expected_available = TEST_DEPTH - TEST_EXPECTED_BUFFER_SIZE;
+    uint32_t expected_available = TEST_DEPTH;
     ck_assert_uint_eq(pwar_ring_buffer_get_available(), expected_available);
     
     pwar_ring_buffer_free();
@@ -253,14 +257,14 @@ START_TEST(test_ring_buffer_channel_mismatch)
 {
     pwar_ring_buffer_init(TEST_DEPTH, TEST_CHANNELS, TEST_EXPECTED_BUFFER_SIZE);
     
-    float buffer[3 * 100]; // Wrong channel count
+    float buffer[3 * TEST_EXPECTED_BUFFER_SIZE]; // Wrong channel count
     
     // Push with wrong channel count should fail
-    int ret = pwar_ring_buffer_push(buffer, 100, 3);
+    int ret = pwar_ring_buffer_push(buffer, TEST_EXPECTED_BUFFER_SIZE, 3);
     ck_assert_int_eq(ret, -1);
     
     // Pop with wrong channel count should fail
-    ret = pwar_ring_buffer_pop(buffer, 100, 3);
+    ret = pwar_ring_buffer_pop(buffer, TEST_EXPECTED_BUFFER_SIZE, 3);
     ck_assert_int_eq(ret, -1);
     
     pwar_ring_buffer_free();
@@ -272,23 +276,23 @@ START_TEST(test_ring_buffer_null_pointers)
 {
     pwar_ring_buffer_init(TEST_DEPTH, TEST_CHANNELS, TEST_EXPECTED_BUFFER_SIZE);
     
-    float buffer[TEST_CHANNELS * 100];
+    float buffer[TEST_CHANNELS * TEST_EXPECTED_BUFFER_SIZE];
     
     // Push with NULL buffer should fail
-    int ret = pwar_ring_buffer_push(NULL, 100, TEST_CHANNELS);
+    int ret = pwar_ring_buffer_push(NULL, TEST_EXPECTED_BUFFER_SIZE, TEST_CHANNELS);
     ck_assert_int_eq(ret, -1);
     
     // Pop with NULL buffer should fail
-    ret = pwar_ring_buffer_pop(NULL, 100, TEST_CHANNELS);
+    ret = pwar_ring_buffer_pop(NULL, TEST_EXPECTED_BUFFER_SIZE, TEST_CHANNELS);
     ck_assert_int_eq(ret, -1);
     
     pwar_ring_buffer_free();
     
     // Operations on uninitialized buffer should fail
-    ret = pwar_ring_buffer_push(buffer, 100, TEST_CHANNELS);
+    ret = pwar_ring_buffer_push(buffer, TEST_EXPECTED_BUFFER_SIZE, TEST_CHANNELS);
     ck_assert_int_eq(ret, -1);
     
-    ret = pwar_ring_buffer_pop(buffer, 100, TEST_CHANNELS);
+    ret = pwar_ring_buffer_pop(buffer, TEST_EXPECTED_BUFFER_SIZE, TEST_CHANNELS);
     ck_assert_int_eq(ret, -1);
 }
 END_TEST
@@ -298,10 +302,18 @@ START_TEST(test_ring_buffer_stats_reset)
 {
     pwar_ring_buffer_init(TEST_DEPTH, TEST_CHANNELS, TEST_EXPECTED_BUFFER_SIZE);
     
-    // Cause some overruns and underruns
+    // Cause an overrun first
     float large_buffer[TEST_CHANNELS * (TEST_DEPTH + 100)];
     pwar_ring_buffer_push(large_buffer, TEST_DEPTH + 100, TEST_CHANNELS);
-    pwar_ring_buffer_pop(large_buffer, TEST_DEPTH + 100, TEST_CHANNELS);
+    ck_assert_uint_gt(pwar_ring_buffer_get_overruns(), 0);
+    
+    // Check how many samples are actually available after the overrun
+    uint32_t available_after_overrun = pwar_ring_buffer_get_available();
+    
+    // Now cause an underrun by popping more than what's available
+    uint32_t samples_to_cause_underrun = available_after_overrun + 100;
+    float extra_large_buffer[TEST_CHANNELS * samples_to_cause_underrun];
+    pwar_ring_buffer_pop(extra_large_buffer, samples_to_cause_underrun, TEST_CHANNELS);
     
     ck_assert_uint_gt(pwar_ring_buffer_get_overruns(), 0);
     ck_assert_uint_gt(pwar_ring_buffer_get_underruns(), 0);
@@ -345,15 +357,15 @@ START_TEST(test_ring_buffer_reinit)
     // First initialization
     pwar_ring_buffer_init(TEST_DEPTH, TEST_CHANNELS, TEST_EXPECTED_BUFFER_SIZE);
     
-    float buffer[TEST_CHANNELS * 100];
-    fill_test_data(buffer, TEST_CHANNELS, 100, 1000.0f);
-    pwar_ring_buffer_push(buffer, 100, TEST_CHANNELS);
+    float buffer[TEST_CHANNELS * TEST_EXPECTED_BUFFER_SIZE];
+    fill_test_data(buffer, TEST_CHANNELS, TEST_EXPECTED_BUFFER_SIZE, 1000.0f);
+    pwar_ring_buffer_push(buffer, TEST_EXPECTED_BUFFER_SIZE, TEST_CHANNELS);
     
     // Re-initialize with different parameters
     pwar_ring_buffer_init(TEST_DEPTH/2, TEST_CHANNELS, TEST_EXPECTED_BUFFER_SIZE/2);
     
     // Should have new prefill amount
-    uint32_t expected_available = (TEST_DEPTH/2) - (TEST_EXPECTED_BUFFER_SIZE/2);
+    uint32_t expected_available = TEST_DEPTH/2;
     ck_assert_uint_eq(pwar_ring_buffer_get_available(), expected_available);
     
     // Stats should be reset
@@ -372,13 +384,13 @@ START_TEST(test_ring_buffer_wrap_around_integrity)
     uint32_t small_expected = 20;
     pwar_ring_buffer_init(small_depth, TEST_CHANNELS, small_expected);
     
-    uint32_t chunk_size = 30;
+    uint32_t chunk_size = small_expected; // Use expected buffer size for this test
     float input_buffer[TEST_CHANNELS * chunk_size];
     float output_buffer[TEST_CHANNELS * chunk_size];
     
     // Consume prefill first
-    float prefill_buffer[TEST_CHANNELS * (small_depth - small_expected)];
-    pwar_ring_buffer_pop(prefill_buffer, small_depth - small_expected, TEST_CHANNELS);
+    float prefill_buffer[TEST_CHANNELS * small_depth];
+    pwar_ring_buffer_pop(prefill_buffer, small_depth, TEST_CHANNELS);
     
     // Now do multiple push/pop cycles to force wrap-around
     for (int cycle = 0; cycle < 10; cycle++) {

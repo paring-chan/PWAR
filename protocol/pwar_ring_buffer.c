@@ -120,10 +120,9 @@ int pwar_ring_buffer_push(float *buffer, uint32_t n_samples, uint32_t channels) 
         // Overrun detected - we'll overwrite the oldest data
         ring_buffer.overruns++;
         
-        // Move read pointer forward to make space
+        // Move read pointer forward to make space for new data
         uint32_t samples_to_skip = samples_to_write - free_space;
         ring_buffer.read_index = (ring_buffer.read_index + samples_to_skip) % ring_buffer.depth;
-        ring_buffer.available -= samples_to_skip; // After skipping, no valid data remains until we write
         
         printf("Warning: Ring buffer overrun detected. Skipped %d samples (total overruns: %d)\n", 
                samples_to_skip, ring_buffer.overruns);
@@ -141,7 +140,12 @@ int pwar_ring_buffer_push(float *buffer, uint32_t n_samples, uint32_t channels) 
         ring_buffer.write_index = (ring_buffer.write_index + 1) % ring_buffer.depth;
     }
     
-    ring_buffer.available += samples_to_write;
+    // Update available count: if overrun occurred, buffer is now full
+    if (samples_to_write > free_space) {
+        ring_buffer.available = ring_buffer.depth; // Buffer is full after overrun
+    } else {
+        ring_buffer.available += samples_to_write; // Normal case
+    }
     
     pthread_mutex_unlock(&ring_buffer.mutex);
     
