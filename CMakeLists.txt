@@ -15,7 +15,6 @@ enable_testing()
 if(WIN32)
     # Windows-specific targets
     add_subdirectory(windows/asio)
-    add_subdirectory(windows/torture)
     add_subdirectory(windows/simulator)
 else()
     # Linux-specific targets

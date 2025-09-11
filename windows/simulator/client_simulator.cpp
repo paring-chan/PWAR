@@ -35,7 +35,7 @@ extern "C" {
 #define DEFAULT_SERVER_PORT 8321
 #define DEFAULT_CLIENT_PORT 8321
 #define DEFAULT_CHANNELS 2
-#define DEFAULT_BUFFER_SIZE 512
+#define DEFAULT_PACKET_SIZE 512
 
 // Configuration structure
 typedef struct {
@@ -43,7 +43,7 @@ typedef struct {
     int server_port;
     int client_port;
     int channels;
-    int buffer_size;
+    int packet_size;
     int verbose;
 } client_config_t;
 
@@ -59,16 +59,16 @@ static void print_usage(const char *program_name) {
     printf("Usage: %s [options]\n", program_name);
     printf("Options:\n");
     printf("  -s, --server <ip>      Server IP address (default: %s)\n", DEFAULT_SERVER_IP);
-    printf("  -p, --port <port>      Server port (default: %d)\n", DEFAULT_SERVER_PORT);
+    printf("  --server-port <port>   Server port (default: %d)\n", DEFAULT_SERVER_PORT);
     printf("  -c, --client-port <port> Client listening port (default: %d)\n", DEFAULT_CLIENT_PORT);
-    printf("  -b, --buffer <size>    Buffer size in samples (default: %d)\n", DEFAULT_BUFFER_SIZE);
+    printf("  -p, --packet-size <size> Packet size in samples (default: %d)\n", DEFAULT_PACKET_SIZE);
     printf("  -n, --channels <count> Number of channels (default: %d)\n", DEFAULT_CHANNELS);
     printf("  -v, --verbose          Enable verbose output\n");
     printf("  -h, --help             Show this help message\n");
     printf("\nExamples:\n");
     printf("  %s                           # Connect to localhost with defaults\n", program_name);
-    printf("  %s -s 192.168.1.100 -p 9000  # Connect to remote server\n", program_name);
-    printf("  %s -v -b 256 -c 1            # Verbose mode, smaller buffer, mono\n", program_name);
+    printf("  %s -s 192.168.1.100 --server-port 9000  # Connect to remote server\n", program_name);
+    printf("  %s -v -p 256 -c 1            # Verbose mode, smaller packets, mono\n", program_name);
     printf("\nDescription:\n");
     printf("  This simulator acts like a PWAR client (e.g., Windows ASIO driver).\n");
     printf("  It receives audio packets from a PWAR server, processes them,\n");
@@ -81,7 +81,7 @@ static int parse_arguments(int argc, char *argv[], client_config_t *cfg) {
     cfg->server_port = DEFAULT_SERVER_PORT;
     cfg->client_port = DEFAULT_CLIENT_PORT;
     cfg->channels = DEFAULT_CHANNELS;
-    cfg->buffer_size = DEFAULT_BUFFER_SIZE;
+    cfg->packet_size = DEFAULT_PACKET_SIZE;
     cfg->verbose = 0;
     
     for (int i = 1; i < argc; i++) {
@@ -90,12 +90,12 @@ static int parse_arguments(int argc, char *argv[], client_config_t *cfg) {
             return -1;
         } else if ((strcmp(argv[i], "-s") == 0 || strcmp(argv[i], "--server") == 0) && i + 1 < argc) {
             strcpy_s(cfg->server_ip, sizeof(cfg->server_ip), argv[++i]);
-        } else if ((strcmp(argv[i], "-p") == 0 || strcmp(argv[i], "--port") == 0) && i + 1 < argc) {
+        } else if (strcmp(argv[i], "--server-port") == 0 && i + 1 < argc) {
             cfg->server_port = atoi(argv[++i]);
         } else if ((strcmp(argv[i], "-c") == 0 || strcmp(argv[i], "--client-port") == 0) && i + 1 < argc) {
             cfg->client_port = atoi(argv[++i]);
-        } else if ((strcmp(argv[i], "-b") == 0 || strcmp(argv[i], "--buffer") == 0) && i + 1 < argc) {
-            cfg->buffer_size = atoi(argv[++i]);
+        } else if ((strcmp(argv[i], "-p") == 0 || strcmp(argv[i], "--packet-size") == 0) && i + 1 < argc) {
+            cfg->packet_size = atoi(argv[++i]);
         } else if ((strcmp(argv[i], "-n") == 0 || strcmp(argv[i], "--channels") == 0) && i + 1 < argc) {
             cfg->channels = atoi(argv[++i]);
         } else if (strcmp(argv[i], "-v") == 0 || strcmp(argv[i], "--verbose") == 0) {
@@ -120,8 +120,8 @@ static int parse_arguments(int argc, char *argv[], client_config_t *cfg) {
         fprintf(stderr, "Invalid channel count: %d (must be 1-8)\n", cfg->channels);
         return -1;
     }
-    if (cfg->buffer_size < 32 || cfg->buffer_size > 4096) {
-        fprintf(stderr, "Invalid buffer size: %d (must be 32-4096)\n", cfg->buffer_size);
+    if (cfg->packet_size < 32 || cfg->packet_size > 4096) {
+        fprintf(stderr, "Invalid packet size: %d (must be 32-4096)\n", cfg->packet_size);
         return -1;
     }
     
@@ -290,7 +290,7 @@ int main(int argc, char *argv[]) {
     printf("  Server:        %s:%d\n", config.server_ip, config.server_port);
     printf("  Client port:   %d\n", config.client_port);
     printf("  Channels:      %d\n", config.channels);
-    printf("  Buffer size:   %d samples\n", config.buffer_size);
+    printf("  Packet size:   %d samples\n", config.packet_size);
     printf("  Verbose:       %s\n", config.verbose ? "enabled" : "disabled");
     printf("\n");
     
@@ -298,9 +298,6 @@ int main(int argc, char *argv[]) {
     if (!SetConsoleCtrlHandler(console_ctrl_handler, TRUE)) {
         fprintf(stderr, "Warning: Failed to set console control handler\n");
     }
-    
-    // Initialize PWAR components
-    latency_manager_init(48000, config.buffer_size); // Use default 48kHz sample rate
     
     // Set up networking
     setup_recv_socket(config.client_port);

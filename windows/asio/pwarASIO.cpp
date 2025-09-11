@@ -370,8 +370,7 @@ error:
         return ASE_NoMemory;
     }
     this->callbacks = callbacks;
-    // Initialize latency manager with sample rate and buffer size
-    latency_manager_init(static_cast<int>(sampleRate), blockFrames);
+
     input_buffers = new float[PWAR_MAX_CHANNELS * blockFrames];
     output_buffers = new float[PWAR_MAX_CHANNELS * blockFrames];
 
@@ -559,9 +558,9 @@ void pwarASIO::udp_iocp_listener() {
                 // Copy audio data from packet to ASIO input buffers
                 for (long i = 0; i < activeInputs && i < PWAR_CHANNELS; ++i) {
                     float* dest = inputBuffers[i] + (toggle ? blockFrames : 0);
-                    // Copy samples from packet (channel-separated)
+                    // Copy samples from packet (interleaved format: L, R, L, R, ...)
                     for (int j = 0; j < blockFrames && j < packet.n_samples; ++j) {
-                        dest[j] = packet.samples[i][j];
+                        dest[j] = packet.samples[j * PWAR_CHANNELS + i];
                     }
                     // Fill remaining with zeros if packet has fewer samples
                     for (int j = packet.n_samples; j < blockFrames; ++j) {
@@ -582,13 +581,13 @@ void pwarASIO::udp_iocp_listener() {
                 response_packet = packet; // Copy structure
                 response_packet.t3_windows_send = latency_manager_timestamp_now();
                 
-                // Copy output samples (channel-separated)
+                // Copy output samples to interleaved format (L, R, L, R, ...)
                 float* outputCh1 = outputBuffers[0] + (toggle ? blockFrames : 0);
                 float* outputCh2 = (activeOutputs > 1) ? outputBuffers[1] + (toggle ? blockFrames : 0) : outputCh1;
                 
                 for (int j = 0; j < blockFrames && j < response_packet.n_samples; ++j) {
-                    response_packet.samples[0][j] = outputCh1[j];
-                    response_packet.samples[1][j] = outputCh2[j];
+                    response_packet.samples[j * PWAR_CHANNELS + 0] = outputCh1[j];
+                    response_packet.samples[j * PWAR_CHANNELS + 1] = outputCh2[j];
                 }
                 
                 // Send response packet back to server
