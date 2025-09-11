@@ -127,15 +127,7 @@ static void *receiver_thread(void *userdata) {
             latency_manager_process_packet(packet);
             data->current_windows_buffer_size = packet->n_samples;
             
-            // Direct push to ring buffer - assume single packet for now
-            // Convert from packet format to channel-major format
-            for (uint32_t ch = 0; ch < NUM_CHANNELS; ch++) {
-                for (uint32_t i = 0; i < packet->n_samples; i++) {
-                    output_buffers[ch * packet->n_samples + i] = packet->samples[ch][i];
-                }
-            }
-            
-            pwar_ring_buffer_push(output_buffers, packet->n_samples, NUM_CHANNELS);
+            pwar_ring_buffer_push(packet->samples, packet->n_samples, NUM_CHANNELS);
             latency_manager_report_ring_buffer_fill_level(pwar_ring_buffer_get_available());
         } else if (n < 0) {
             // Check if it's a timeout (expected) vs a real error
@@ -171,9 +163,11 @@ static void process_audio(struct pwar_core_data *data, float *in, uint32_t n_sam
     pwar_packet_t packet;
     packet.n_samples = n_samples;
     
-    // Copy input samples to both channels
-    memcpy(packet.samples[0], in, n_samples * sizeof(float));
-    memcpy(packet.samples[1], in, n_samples * sizeof(float));
+    // Copy input samples to both channels in interleaved format
+    for (uint32_t i = 0; i < n_samples; i++) {
+        packet.samples[i * PWAR_CHANNELS + 0] = in[i];  // Left channel
+        packet.samples[i * PWAR_CHANNELS + 1] = in[i];  // Right channel
+    }
     
     packet.t1_linux_send = latency_manager_timestamp_now();
     
@@ -182,15 +176,17 @@ static void process_audio(struct pwar_core_data *data, float *in, uint32_t n_sam
         perror("sendto failed");
     }
     
-    // Get processed samples from ring buffer
+    // Get processed samples from ring buffer (interleaved format)
     float rcv_buffers[NUM_CHANNELS * n_samples];
     memset(rcv_buffers, 0, sizeof(rcv_buffers));
     
     pwar_ring_buffer_pop(rcv_buffers, n_samples, NUM_CHANNELS);
     
-    // Copy to output channels
-    if (left_out) memcpy(left_out, rcv_buffers, n_samples * sizeof(float));
-    if (right_out) memcpy(right_out, rcv_buffers + n_samples, n_samples * sizeof(float));
+    // Convert from interleaved format to separate channel outputs
+    for (uint32_t i = 0; i < n_samples; i++) {
+        if (left_out) left_out[i] = rcv_buffers[i * NUM_CHANNELS + 0];
+        if (right_out) right_out[i] = rcv_buffers[i * NUM_CHANNELS + 1];
+    }
 }
 
 // Extract common initialization logic

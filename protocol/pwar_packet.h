@@ -14,16 +14,6 @@
 #define PWAR_PACKET_MIN_CHUNK_SIZE 32
 #define PWAR_CHANNELS 2
 
-/*
- * NOTE: This packet structure is currently locked to 2 channels (PWAR_CHANNELS = 2) for simplicity and compatibility.
- * The underlying protocol and codebase are designed to support an arbitrary number of channels in the future.
- *
- * When multi-channel support is implemented, this struct will be refactored to use a flat sample array with stride,
- * rather than a fixed 2D array. This will allow for more flexible and efficient handling of any channel count.
- *
- * If you are developing for more than 2 channels, be aware that this is a planned area of development.
- */
-
 typedef struct {
     uint16_t n_samples; // I.e. the current chunk size, must be <= PWAR_PACKET_MAX_CHUNK_SIZE
 
@@ -33,7 +23,7 @@ typedef struct {
     uint64_t t3_windows_send;
     uint64_t t4_linux_recv;
 
-    float samples[PWAR_CHANNELS][PWAR_PACKET_MAX_CHUNK_SIZE]; // interleaved samples
+    float samples[PWAR_CHANNELS * PWAR_PACKET_MAX_CHUNK_SIZE]; // interleaved samples
 } pwar_packet_t;
 
 
