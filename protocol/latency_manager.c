@@ -39,6 +39,8 @@ static struct {
     uint32_t clock_offset_count;
     int64_t current_clock_offset;
 
+    float audio_backend_latency_ms;
+
     uint64_t last_print_time;
 
 } internal = {0};
@@ -57,9 +59,10 @@ static void process_latency_stat(latency_stat_t *stat, uint64_t value) {
 }
 
 
-void latency_manager_init(uint32_t sample_rate, uint32_t buffer_size) {
+void latency_manager_init(uint32_t sample_rate, uint32_t buffer_size, float audio_backend_latency_ms) {
     internal.expected_interval_ms = (buffer_size / (float)sample_rate) * 1000.0f;
     internal.sample_rate = sample_rate;
+    internal.audio_backend_latency_ms = audio_backend_latency_ms;
 }
 
 
@@ -129,10 +132,10 @@ void latency_manager_process_packet(pwar_packet_t *packet) {
     
     uint64_t time_since_print = current_time - internal.last_print_time;
     if (time_since_print >= 2000000000ULL) { // 2 seconds in nanoseconds
-        printf("[PWAR]: BufferDelay: min=%.2fms avg=%.2fms max=%.2fms | RTT: min=%.2fms avg=%.2fms max=%.2fms | AudioProc: min=%.2fms avg=%.2fms max=%.2fms | WinJitter: min=%.2fms avg=%.2fms max=%.2fms | LinuxJitter: min=%.2fms avg=%.2fms max=%.2fms\n",
-               (internal.ring_buffer_fill_level_stat.min / (float)internal.sample_rate) * 1000.0f,
-               (internal.ring_buffer_fill_level_stat.avg / (float)internal.sample_rate) * 1000.0f,
-               (internal.ring_buffer_fill_level_stat.max / (float)internal.sample_rate) * 1000.0f,
+        printf("[PWAR]: Audio RTT: min=%.2fms avg=%.2fms max=%.2fms | Net RTT: min=%.2fms avg=%.2fms max=%.2fms | AudioProc: min=%.2fms avg=%.2fms max=%.2fms | WinJitter: min=%.2fms avg=%.2fms max=%.2fms | LinuxJitter: min=%.2fms avg=%.2fms max=%.2fms\n",
+               ((internal.ring_buffer_fill_level_stat.min / (float)internal.sample_rate) * 1000.0f) + internal.audio_backend_latency_ms,
+               ((internal.ring_buffer_fill_level_stat.avg / (float)internal.sample_rate) * 1000.0f) + internal.audio_backend_latency_ms,
+               ((internal.ring_buffer_fill_level_stat.max / (float)internal.sample_rate) * 1000.0f) + internal.audio_backend_latency_ms,
                internal.rtt_stat.min / 1000000.0,
                internal.rtt_stat.avg / 1000000.0,
                internal.rtt_stat.max / 1000000.0,

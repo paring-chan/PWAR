@@ -277,13 +277,20 @@ static void simulated_get_stats(audio_backend_t *backend, void *stats) {
            (unsigned long long)data->total_callbacks);
 }
 
+static float simulated_get_latency(audio_backend_t *backend) {
+    simulated_backend_data_t *data = (simulated_backend_data_t *)backend->private_data;
+    if (!data || !data->sample_rate) return 0.0f;
+    return ((float)data->frames * 2.0f * 1000.0f) / (float)data->sample_rate;
+}
+
 static const audio_backend_ops_t simulated_ops = {
     .init = simulated_init,
     .start = simulated_start,
     .stop = simulated_stop,
     .cleanup = simulated_cleanup,
     .is_running = simulated_is_running,
-    .get_stats = simulated_get_stats
+    .get_stats = simulated_get_stats,
+    .get_latency = simulated_get_latency
 };
 
 audio_backend_t* audio_backend_create_simulated(void) {

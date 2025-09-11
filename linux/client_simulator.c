@@ -260,9 +260,6 @@ int main(int argc, char *argv[]) {
     signal(SIGINT, signal_handler);
     signal(SIGTERM, signal_handler);
     
-    // Initialize PWAR components
-    latency_manager_init(48000, config.buffer_size); // Use default 48kHz sample rate
-    
     // Set up networking
     setup_recv_socket(config.client_port);
     setup_send_socket(config.server_ip, config.server_port);

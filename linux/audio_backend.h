@@ -56,6 +56,9 @@ typedef struct audio_backend_ops {
     
     // Get backend-specific statistics (optional)
     void (*get_stats)(struct audio_backend *backend, void *stats);
+
+    // Get current backend latency in milliseconds
+    float (*get_latency)(struct audio_backend *backend);
 } audio_backend_ops_t;
 
 // Audio backend instance
@@ -93,6 +96,9 @@ int audio_backend_stop(audio_backend_t *backend);
 void audio_backend_cleanup(audio_backend_t *backend);
 int audio_backend_is_running(audio_backend_t *backend);
 void audio_backend_get_stats(audio_backend_t *backend, void *stats);
+
+// Get current backend latency in milliseconds
+float audio_backend_get_latency(audio_backend_t *backend);
 
 #ifdef __cplusplus
 }

@@ -49,6 +49,13 @@ void audio_backend_get_stats(audio_backend_t *backend, void *stats) {
     backend->ops->get_stats(backend, stats);
 }
 
+float audio_backend_get_latency(audio_backend_t *backend) {
+    if (!backend || !backend->ops || !backend->ops->get_latency) {
+        return 0.0f;
+    }
+    return backend->ops->get_latency(backend);
+}
+
 // Unified factory function
 audio_backend_t* audio_backend_create(audio_backend_type_t type) {
     switch (type) {

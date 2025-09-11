@@ -42,6 +42,9 @@ typedef struct {
     
     // Statistics
     alsa_stats_t stats;
+
+    // Latency measurement
+    float latency_ms;
 } alsa_backend_data_t;
 
 static double get_ms_elapsed(const struct timeval *t0, const struct timeval *t1) {
@@ -70,7 +73,8 @@ static int setup_pcm(snd_pcm_t **handle,
                      snd_pcm_stream_t stream,
                      unsigned int rate,
                      unsigned int channels,
-                     snd_pcm_uframes_t period)
+                     snd_pcm_uframes_t period,
+                     alsa_backend_data_t *data)
 {
     int err;
     snd_pcm_hw_params_t *hw;
@@ -126,10 +130,15 @@ static int setup_pcm(snd_pcm_t **handle,
     snd_pcm_hw_params_get_rate(hw, &rr, &dir);
     snd_pcm_hw_params_get_period_size(hw, &per, &dir);
     snd_pcm_hw_params_get_buffer_size(hw, &buf);
+
+    float latency = rr ? ((float)buf * 1000.0f / rr) : 0.0f;
     printf("ALSA %s: %u Hz, %u ch, period=%lu, buffer=%lu (%.2f ms buffer)\n",
            stream == SND_PCM_STREAM_PLAYBACK ? "Playback" : "Capture",
            rr, channels, (unsigned long)per, (unsigned long)buf,
-           (double)buf * 1000.0 / rr);
+           latency);
+    if (data) {
+        data->latency_ms += latency;
+    }
 
     return 0;
 }
@@ -266,13 +275,14 @@ static int alsa_init(audio_backend_t *backend, const audio_config_t *config,
     }
     
     // Setup ALSA devices
+    data->latency_ms = 0.0f;
     if (setup_pcm(&data->playback_handle, config->device_playback, SND_PCM_STREAM_PLAYBACK,
-                  config->sample_rate, config->playback_channels, config->frames) < 0) {
+                  config->sample_rate, config->playback_channels, config->frames, data) < 0) {
         return -1;
     }
     
     if (setup_pcm(&data->capture_handle, config->device_capture, SND_PCM_STREAM_CAPTURE,
-                  config->sample_rate, config->capture_channels, config->frames) < 0) {
+                  config->sample_rate, config->capture_channels, config->frames, data) < 0) {
         snd_pcm_close(data->playback_handle);
         return -1;
     }
@@ -382,8 +392,15 @@ static const audio_backend_ops_t alsa_ops = {
     .stop = alsa_stop,
     .cleanup = alsa_cleanup,
     .is_running = alsa_is_running,
-    .get_stats = alsa_get_stats
+    .get_stats = alsa_get_stats,
+    .get_latency = alsa_get_latency
 };
+
+// Return the sum of playback and capture buffer latencies in ms
+static float alsa_get_latency(audio_backend_t *backend) {
+    alsa_backend_data_t *data = (alsa_backend_data_t *)backend->private_data;
+    if (!data) return 0.0f;
+    return data->latency_ms;
 
 audio_backend_t* audio_backend_create_alsa(void) {
     audio_backend_t *backend = malloc(sizeof(audio_backend_t));

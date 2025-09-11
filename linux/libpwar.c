@@ -206,9 +206,6 @@ static int init_core_data(struct pwar_core_data *data, const pwar_config_t *conf
     // Initialize ring buffer with configured depth and expected buffer size
     pwar_ring_buffer_init(config->ring_buffer_depth, NUM_CHANNELS, config->buffer_size);
     
-    // Initialize latency manager
-    latency_manager_init(config->audio_config.sample_rate, config->buffer_size);
-    
     // Create appropriate audio backend using unified factory
     if (!audio_backend_is_available(config->backend_type)) {
         fprintf(stderr, "Audio backend type %d is not available (not compiled in)\n", config->backend_type);
@@ -230,6 +227,9 @@ static int init_core_data(struct pwar_core_data *data, const pwar_config_t *conf
         data->audio_backend = NULL;
         return -1;
     }
+    
+    // Initialize latency manager
+    latency_manager_init(config->audio_config.sample_rate, config->buffer_size, data->audio_backend->ops->get_latency(data->audio_backend));
     
     return 0;
 }
