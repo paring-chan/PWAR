@@ -12,11 +12,13 @@
 #define DEFAULT_STREAM_IP          "192.168.66.3"
 #define DEFAULT_STREAM_PORT        8321
 #define DEFAULT_PASSTHROUGH_TEST   0        // 1 = local passthrough test
+#define DEFAULT_DEVICE_BUFFER_SIZE 32       // Device buffer size in frames
+#define DEFAULT_WINDOWS_PACKET_SIZE 64      // Windows packet buffer size in frames
 #define DEFAULT_RING_BUFFER_DEPTH  2048     // Ring buffer depth in samples
 
 // Audio defaults
 #define DEFAULT_SAMPLE_RATE         48000
-#define DEFAULT_FRAMES              32
+#define DEFAULT_FRAMES              32      // Legacy - same as device buffer size
 #define DEFAULT_CHANNELS            2
 
 // ALSA specific defaults
@@ -26,25 +28,29 @@
 static void print_usage(const char *program_name) {
     printf("Usage: %s [options]\n", program_name);
     printf("Options:\n");
-    printf("  -b, --backend <backend>    Audio backend: alsa or pipewire (default: pipewire)\n");
+    printf("  --backend <backend>        Audio backend: alsa or pipewire (default: pipewire)\n");
     printf("  -i, --ip <ip>              Target IP address (default: %s)\n", DEFAULT_STREAM_IP);
-    printf("  -p, --port <port>          Target port (default: %d)\n", DEFAULT_STREAM_PORT);
+    printf("  --port <port>              Target port (default: %d)\n", DEFAULT_STREAM_PORT);
     printf("  -t, --passthrough          Enable passthrough test mode\n");
-    printf("  -f, --frames <frames>      Buffer size in frames (default: %d)\n", DEFAULT_FRAMES);
+    printf("  -b, --device-buffer <size> Device buffer size in frames (default: %d)\n", DEFAULT_DEVICE_BUFFER_SIZE);
+    printf("  -p, --packet-buffer <size> Windows packet buffer size in frames (default: %d)\n", DEFAULT_WINDOWS_PACKET_SIZE);
     printf("  -r, --rate <rate>          Sample rate (default: %d)\n", DEFAULT_SAMPLE_RATE);
     printf("  -d, --ring-depth <depth>   Ring buffer depth in samples (default: %d)\n", DEFAULT_RING_BUFFER_DEPTH);
     printf("  --capture-device <device>  ALSA capture device (ALSA only, default: %s)\n", DEFAULT_PCM_DEVICE_CAPTURE);
     printf("  --playback-device <device> ALSA playback device (ALSA only, default: %s)\n", DEFAULT_PCM_DEVICE_PLAYBACK);
     printf("  -h, --help                 Show this help message\n");
+    printf("\nBuffer size guidelines:\n");
+    printf("  Device buffer: 32, 64, 128, 256 frames (lower = lower latency, higher CPU load)\n");
+    printf("  Packet buffer: Must be multiple of device buffer (64, 128, 256, 512 frames)\n");
     printf("\nBackends:\n");
     printf("  alsa                       Use ALSA for audio I/O\n");
     printf("  pipewire                   Use PipeWire for audio I/O\n");
     printf("  simulated                  Use simulated audio for testing (no hardware needed)\n");
     printf("\nExamples:\n");
     printf("  %s                         # Use PipeWire with default settings\n", program_name);
-    printf("  %s -b alsa -i 192.168.1.100 -p 9000 -f 64\n", program_name);
-    printf("  %s --backend pipewire --frames 128\n", program_name);
-    printf("  %s -b simulated --passthrough   # Test mode without hardware\n", program_name);
+    printf("  %s --backend alsa -i 192.168.1.100 --port 9000 -b 64 -p 128\n", program_name);
+    printf("  %s --backend pipewire -b 32 -p 64\n", program_name);
+    printf("  %s --backend simulated --passthrough   # Test mode without hardware\n", program_name);
 }
 
 static audio_backend_type_t parse_backend(const char *backend_str) {
@@ -64,7 +70,8 @@ static int parse_arguments(int argc, char *argv[], pwar_config_t *config) {
     strcpy(config->stream_ip, DEFAULT_STREAM_IP);
     config->stream_port = DEFAULT_STREAM_PORT;
     config->passthrough_test = DEFAULT_PASSTHROUGH_TEST;
-    config->buffer_size = DEFAULT_FRAMES;
+    config->device_buffer_size = DEFAULT_DEVICE_BUFFER_SIZE;
+    config->windows_packet_size = DEFAULT_WINDOWS_PACKET_SIZE;
     config->ring_buffer_depth = DEFAULT_RING_BUFFER_DEPTH;
     config->backend_type = AUDIO_BACKEND_PIPEWIRE; // Default to PipeWire
     
@@ -72,7 +79,7 @@ static int parse_arguments(int argc, char *argv[], pwar_config_t *config) {
     config->audio_config.device_playback = DEFAULT_PCM_DEVICE_PLAYBACK;
     config->audio_config.device_capture = DEFAULT_PCM_DEVICE_CAPTURE;
     config->audio_config.sample_rate = DEFAULT_SAMPLE_RATE;
-    config->audio_config.frames = DEFAULT_FRAMES;
+    config->audio_config.frames = DEFAULT_DEVICE_BUFFER_SIZE;  // Use device buffer size
     config->audio_config.playback_channels = DEFAULT_CHANNELS;
     config->audio_config.capture_channels = DEFAULT_CHANNELS;
     
@@ -80,18 +87,20 @@ static int parse_arguments(int argc, char *argv[], pwar_config_t *config) {
         if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
             print_usage(argv[0]);
             return -1;
-        } else if ((strcmp(argv[i], "-b") == 0 || strcmp(argv[i], "--backend") == 0) && i + 1 < argc) {
+        } else if (strcmp(argv[i], "--backend") == 0 && i + 1 < argc) {
             config->backend_type = parse_backend(argv[++i]);
         } else if ((strcmp(argv[i], "-i") == 0 || strcmp(argv[i], "--ip") == 0) && i + 1 < argc) {
             strcpy(config->stream_ip, argv[++i]);
-        } else if ((strcmp(argv[i], "-p") == 0 || strcmp(argv[i], "--port") == 0) && i + 1 < argc) {
+        } else if (strcmp(argv[i], "--port") == 0 && i + 1 < argc) {
             config->stream_port = atoi(argv[++i]);
         } else if (strcmp(argv[i], "-t") == 0 || strcmp(argv[i], "--passthrough") == 0) {
             config->passthrough_test = 1;
-        } else if ((strcmp(argv[i], "-f") == 0 || strcmp(argv[i], "--frames") == 0) && i + 1 < argc) {
-            int frames = atoi(argv[++i]);
-            config->buffer_size = frames;
-            config->audio_config.frames = frames;
+        } else if ((strcmp(argv[i], "-b") == 0 || strcmp(argv[i], "--device-buffer") == 0) && i + 1 < argc) {
+            int device_buffer = atoi(argv[++i]);
+            config->device_buffer_size = device_buffer;
+            config->audio_config.frames = device_buffer;  // Keep audio config in sync
+        } else if ((strcmp(argv[i], "-p") == 0 || strcmp(argv[i], "--packet-buffer") == 0) && i + 1 < argc) {
+            config->windows_packet_size = atoi(argv[++i]);
         } else if ((strcmp(argv[i], "-r") == 0 || strcmp(argv[i], "--rate") == 0) && i + 1 < argc) {
             config->audio_config.sample_rate = atoi(argv[++i]);
         } else if ((strcmp(argv[i], "-d") == 0 || strcmp(argv[i], "--ring-depth") == 0) && i + 1 < argc) {
@@ -105,6 +114,13 @@ static int parse_arguments(int argc, char *argv[], pwar_config_t *config) {
             print_usage(argv[0]);
             return -1;
         }
+    }
+    
+    // Validate that windows_packet_size is a multiple of device_buffer_size
+    if (config->windows_packet_size % config->device_buffer_size != 0) {
+        fprintf(stderr, "Error: Windows packet buffer size (%d) must be a multiple of device buffer size (%d)\n",
+                config->windows_packet_size, config->device_buffer_size);
+        return -1;
     }
     
     return 0;
@@ -154,9 +170,14 @@ int main(int argc, char *argv[]) {
     printf("  Backend: %s\n", backend_name);
     
     printf("  Sample rate: %u Hz\n", config.audio_config.sample_rate);
-    printf("  Buffer size: %u frames (%.2f ms)\n", 
-           config.audio_config.frames,
-           (double)config.audio_config.frames * 1000.0 / config.audio_config.sample_rate);
+    printf("  Device buffer size: %u frames (%.2f ms)\n", 
+           config.device_buffer_size,
+           (double)config.device_buffer_size * 1000.0 / config.audio_config.sample_rate);
+    printf("  Windows packet size: %u frames (%.2f ms)\n", 
+           config.windows_packet_size,
+           (double)config.windows_packet_size * 1000.0 / config.audio_config.sample_rate);
+    printf("  Packets per send: %u device buffers\n",
+           config.windows_packet_size / config.device_buffer_size);
     printf("  Ring buffer depth: %d samples (%.2f ms)\n", 
            config.ring_buffer_depth,
            (double)config.ring_buffer_depth * 1000.0 / config.audio_config.sample_rate);

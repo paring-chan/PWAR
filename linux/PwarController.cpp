@@ -19,7 +19,8 @@ PwarController::PwarController(QObject *parent)
     strcpy(m_config.stream_ip, "192.168.66.3");
     m_config.stream_port = 8321;
     m_config.passthrough_test = 0;
-    m_config.buffer_size = 64;
+    m_config.device_buffer_size = 64;      // For GUI, keep device and windows packet same
+    m_config.windows_packet_size = 64;     // Same as device buffer for simplicity
     m_config.ring_buffer_depth = 2048;
     m_config.backend_type = AUDIO_BACKEND_PIPEWIRE;
     
@@ -108,12 +109,13 @@ void PwarController::setPassthroughTest(bool enabled) {
 }
 
 int PwarController::bufferSize() const {
-    return m_config.buffer_size;
+    return m_config.device_buffer_size;  // Return device buffer size for GUI compatibility
 }
 
 void PwarController::setBufferSize(int size) {
-    if (m_config.buffer_size != size) {
-        m_config.buffer_size = size;
+    if (m_config.device_buffer_size != size) {
+        m_config.device_buffer_size = size;
+        m_config.windows_packet_size = size;  // Keep them the same for GUI simplicity
         m_config.audio_config.frames = size;  // Keep audio config in sync
         emit bufferSizeChanged();
         if (pwar_is_running()) {
@@ -269,7 +271,7 @@ void PwarController::loadSettings() {
     bool savedPassthrough = m_settings->value("audio/passthroughTest", m_config.passthrough_test).toBool();
     setPassthroughTest(savedPassthrough);
     
-    int savedBufferSize = m_settings->value("audio/bufferSize", m_config.buffer_size).toInt();
+    int savedBufferSize = m_settings->value("audio/bufferSize", m_config.device_buffer_size).toInt();
     setBufferSize(savedBufferSize);
     
     int savedRingBufferDepth = m_settings->value("audio/ringBufferDepth", m_config.ring_buffer_depth).toInt();

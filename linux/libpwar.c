@@ -51,6 +51,11 @@ struct pwar_core_data {
     // PWAR protocol state
     uint32_t seq;
     
+    // Buffering for Windows packet accumulation
+    float *accumulation_buffer;          // Buffer to accumulate device buffers
+    uint32_t accumulated_samples;        // Number of samples currently accumulated
+    uint32_t packets_per_send;           // How many device buffers per Windows packet
+    
     uint32_t current_windows_buffer_size;
     volatile int should_stop;
 };
@@ -159,24 +164,39 @@ static void audio_process_callback(float *in, float *out_left, float *out_right,
 
 static void process_audio(struct pwar_core_data *data, float *in, uint32_t n_samples, 
                             float *left_out, float *right_out) {
-    // Send input to Windows
-    pwar_packet_t packet;
-    packet.n_samples = n_samples;
-    
-    // Copy input samples to both channels in interleaved format
+    // Accumulate input samples in interleaved format into the accumulation buffer
     for (uint32_t i = 0; i < n_samples; i++) {
-        packet.samples[i * PWAR_CHANNELS + 0] = in[i];  // Left channel
-        packet.samples[i * PWAR_CHANNELS + 1] = in[i];  // Right channel
+        uint32_t buffer_idx = data->accumulated_samples + i;
+        data->accumulation_buffer[buffer_idx * NUM_CHANNELS + 0] = in[i];  // Left channel
+        data->accumulation_buffer[buffer_idx * NUM_CHANNELS + 1] = in[i];  // Right channel
     }
     
-    packet.t1_linux_send = latency_manager_timestamp_now();
+    data->accumulated_samples += n_samples;
     
-    if (sendto(data->sockfd, &packet, sizeof(packet), 0, 
-               (struct sockaddr *)&data->servaddr, sizeof(data->servaddr)) < 0) {
-        perror("sendto failed");
+    // Check if we have accumulated enough samples for a Windows packet
+    if (data->accumulated_samples >= data->config.windows_packet_size) {
+        // Send accumulated packet to Windows
+        pwar_packet_t packet;
+        packet.n_samples = data->config.windows_packet_size;
+        
+        // Copy accumulated samples to packet
+        memcpy(packet.samples, data->accumulation_buffer, 
+               data->config.windows_packet_size * NUM_CHANNELS * sizeof(float));
+        
+        packet.t1_linux_send = latency_manager_timestamp_now();
+        
+        if (sendto(data->sockfd, &packet, sizeof(packet), 0, 
+                   (struct sockaddr *)&data->servaddr, sizeof(data->servaddr)) < 0) {
+            perror("sendto failed");
+        }
+        
+        // Reset accumulation buffer
+        data->accumulated_samples = 0;
+        memset(data->accumulation_buffer, 0, 
+               data->config.windows_packet_size * NUM_CHANNELS * sizeof(float));
     }
     
-    // Get processed samples from ring buffer (interleaved format)
+    // Get processed samples from ring buffer for current device buffer size
     float rcv_buffers[NUM_CHANNELS * n_samples];
     memset(rcv_buffers, 0, sizeof(rcv_buffers));
     
@@ -199,12 +219,26 @@ static int init_core_data(struct pwar_core_data *data, const pwar_config_t *conf
     
     data->seq = 0;
     
-    // Initialize ring buffer with configured depth and expected buffer size
-    pwar_ring_buffer_init(config->ring_buffer_depth, NUM_CHANNELS, config->buffer_size);
+    // Calculate packets per send and allocate accumulation buffer
+    data->packets_per_send = config->windows_packet_size / config->device_buffer_size;
+    data->accumulated_samples = 0;
+    
+    // Allocate accumulation buffer for interleaved samples
+    size_t buffer_size = config->windows_packet_size * NUM_CHANNELS * sizeof(float);
+    data->accumulation_buffer = (float*)malloc(buffer_size);
+    if (!data->accumulation_buffer) {
+        fprintf(stderr, "Failed to allocate accumulation buffer\n");
+        return -1;
+    }
+    memset(data->accumulation_buffer, 0, buffer_size);
+    
+    // Initialize ring buffer with configured depth and Windows packet size
+    pwar_ring_buffer_init(config->ring_buffer_depth, NUM_CHANNELS, config->windows_packet_size);
     
     // Create appropriate audio backend using unified factory
     if (!audio_backend_is_available(config->backend_type)) {
         fprintf(stderr, "Audio backend type %d is not available (not compiled in)\n", config->backend_type);
+        free(data->accumulation_buffer);
         return -1;
     }
     
@@ -212,6 +246,7 @@ static int init_core_data(struct pwar_core_data *data, const pwar_config_t *conf
     
     if (!data->audio_backend) {
         fprintf(stderr, "Failed to create audio backend\n");
+        free(data->accumulation_buffer);
         return -1;
     }
     
@@ -221,11 +256,12 @@ static int init_core_data(struct pwar_core_data *data, const pwar_config_t *conf
         fprintf(stderr, "Failed to initialize audio backend\n");
         audio_backend_cleanup(data->audio_backend);
         data->audio_backend = NULL;
+        free(data->accumulation_buffer);
         return -1;
     }
     
-    // Initialize latency manager
-    latency_manager_init(config->audio_config.sample_rate, config->buffer_size, data->audio_backend->ops->get_latency(data->audio_backend));
+    // Initialize latency manager with Windows packet size
+    latency_manager_init(config->audio_config.sample_rate, config->windows_packet_size, data->audio_backend->ops->get_latency(data->audio_backend));
     
     return 0;
 }
@@ -238,7 +274,8 @@ static void cli_sigint_handler(int sig) {
 
 // Public API Implementation
 int pwar_requires_restart(const pwar_config_t *old_config, const pwar_config_t *new_config) {
-    if (old_config->buffer_size != new_config->buffer_size ||
+    if (old_config->device_buffer_size != new_config->device_buffer_size ||
+        old_config->windows_packet_size != new_config->windows_packet_size ||
         old_config->ring_buffer_depth != new_config->ring_buffer_depth ||
         strcmp(old_config->stream_ip, new_config->stream_ip) != 0 ||
         old_config->stream_port != new_config->stream_port ||
@@ -335,6 +372,11 @@ void pwar_cleanup(void) {
             close(g_pwar_data->recv_sockfd);
         }
 
+        if (g_pwar_data->accumulation_buffer) {
+            free(g_pwar_data->accumulation_buffer);
+            g_pwar_data->accumulation_buffer = NULL;
+        }
+
         pwar_ring_buffer_free();
 
         free(g_pwar_data);
@@ -393,6 +435,10 @@ int pwar_cli_run(const pwar_config_t *config) {
 
     if (data.sockfd > 0) close(data.sockfd);
     if (data.recv_sockfd > 0) close(data.recv_sockfd);
+    
+    if (data.accumulation_buffer) {
+        free(data.accumulation_buffer);
+    }
 
     pwar_ring_buffer_free();
 
