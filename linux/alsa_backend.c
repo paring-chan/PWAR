@@ -232,7 +232,7 @@ static void *alsa_audio_thread(void *arg) {
         clean_loops++;
         
         // Progress indicator every 1000 clean loops
-        if (clean_loops >= 1000) {
+        if (0 && (clean_loops >= 1000)) {
             printf(".");
             fflush(stdout);
             clean_loops = 0;
