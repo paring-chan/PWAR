@@ -242,13 +242,23 @@ static void pipewire_get_stats(audio_backend_t *backend, void *stats) {
     (void)stats;
 }
 
+static float pipewire_get_latency(audio_backend_t *backend) {
+    pipewire_backend_data_t *data = (pipewire_backend_data_t *)backend->private_data;
+    if (!data || !data->config.sample_rate) return 0.0f;
+    
+    // Return latency based on the configured buffer size
+    // PipeWire uses quantum (frames) for latency calculation
+    return ((float)data->config.frames * 1000.0f) / (float)data->config.sample_rate;
+}
+
 static const audio_backend_ops_t pipewire_ops = {
     .init = pipewire_init,
     .start = pipewire_start,
     .stop = pipewire_stop,
     .cleanup = pipewire_cleanup,
     .is_running = pipewire_is_running,
-    .get_stats = pipewire_get_stats
+    .get_stats = pipewire_get_stats,
+    .get_latency = pipewire_get_latency
 };
 
 audio_backend_t* audio_backend_create_pipewire(void) {
