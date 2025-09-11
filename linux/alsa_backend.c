@@ -232,7 +232,7 @@ static void *alsa_audio_thread(void *arg) {
         clean_loops++;
         
         // Progress indicator every 1000 clean loops
-        if (clean_loops >= 1000) {
+        if (0 && (clean_loops >= 1000)) {
             printf(".");
             fflush(stdout);
             clean_loops = 0;
@@ -386,6 +386,13 @@ static void alsa_get_stats(audio_backend_t *backend, void *stats) {
     }
 }
 
+// Return the sum of playback and capture buffer latencies in ms
+static float alsa_get_latency(audio_backend_t *backend) {
+    alsa_backend_data_t *data = (alsa_backend_data_t *)backend->private_data;
+    if (!data) return 0.0f;
+    return data->latency_ms;
+}
+
 static const audio_backend_ops_t alsa_ops = {
     .init = alsa_init,
     .start = alsa_start,
@@ -395,12 +402,6 @@ static const audio_backend_ops_t alsa_ops = {
     .get_stats = alsa_get_stats,
     .get_latency = alsa_get_latency
 };
-
-// Return the sum of playback and capture buffer latencies in ms
-static float alsa_get_latency(audio_backend_t *backend) {
-    alsa_backend_data_t *data = (alsa_backend_data_t *)backend->private_data;
-    if (!data) return 0.0f;
-    return data->latency_ms;
 
 audio_backend_t* audio_backend_create_alsa(void) {
     audio_backend_t *backend = malloc(sizeof(audio_backend_t));
