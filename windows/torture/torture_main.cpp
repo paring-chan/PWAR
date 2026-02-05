@@ -69,7 +69,7 @@ void udp_receive_thread() {
     SOCKET send_sock = socket(AF_INET, SOCK_DGRAM, 0);
     sockaddr_in dest_addr{};
     dest_addr.sin_family = AF_INET;
-    dest_addr.sin_port = htons(8321);
+    dest_addr.sin_port = htons(8322);
     inet_pton(AF_INET, "192.168.66.2", &dest_addr.sin_addr);
 
     while (running) {
