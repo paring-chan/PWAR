@@ -535,7 +535,7 @@ void pwarASIO::udp_packet_listener() {
     memset(&servaddr, 0, sizeof(servaddr));
     servaddr.sin_family = AF_INET;
     servaddr.sin_addr.s_addr = INADDR_ANY;
-    servaddr.sin_port = htons(8322);
+    servaddr.sin_port = htons(8321);
     if (bind(sockfd, reinterpret_cast<sockaddr*>(&servaddr), sizeof(servaddr)) == SOCKET_ERROR) {
         closesocket(sockfd);
         WSACleanup();
